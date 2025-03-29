@@ -276,20 +276,47 @@ export class GitHubRemote extends RemoteProvider<GitHubRepositoryDescriptor> {
 		return this.encodeUrl(`${this.baseUrl}/commit/${sha}`);
 	}
 
-	protected override getUrlForComparison(base: string, compare: string, notation: '..' | '...'): string {
-		return this.encodeUrl(`${this.baseUrl}/compare/${base}${notation}${compare}`);
+	protected override getUrlForComparison(base: string, head: string, notation: '..' | '...'): string {
+		return this.encodeUrl(`${this.baseUrl}/compare/${base}${notation}${head}`);
 	}
 
-	protected override getUrlForCreatePullRequest(
+	protected override async getUrlForCreatePullRequest(
 		base: { branch?: string; remote: { path: string; url: string } },
-		compare: { branch: string; remote: { path: string; url: string } },
-	): string | undefined {
-		if (base.remote.url === compare.remote.url) {
-			return this.encodeUrl(`${this.baseUrl}/pull/new/${base.branch ?? 'HEAD'}...${compare.branch}`);
+		head: { branch: string; remote: { path: string; url: string } },
+		options?: {
+			title?: string;
+			description?: string;
+			describePullRequest?: () => Promise<{ summary: string; body: string } | undefined>;
+		},
+	): Promise<string | undefined> {
+		const query = new URLSearchParams({ expand: '1' });
+		if (options?.title) {
+			query.set('title', options.title);
+		}
+		if (options?.description) {
+			query.set('body', options.description);
 		}
 
-		const [owner] = compare.remote.path.split('/', 1);
-		return this.encodeUrl(`${this.baseUrl}/pull/new/${base.branch ?? 'HEAD'}...${owner}:${compare.branch}`);
+		if ((!options?.title || !options?.description) && options?.describePullRequest) {
+			const result = await options.describePullRequest();
+			if (result?.summary) {
+				query.set('title', result.summary);
+			}
+			if (result?.body) {
+				query.set('body', result.body);
+			}
+		}
+
+		if (base.remote.url === head.remote.url) {
+			return base.branch
+				? `${this.encodeUrl(`${this.baseUrl}/compare/${base.branch}...${head.branch}`)}?${query.toString()}`
+				: `${this.encodeUrl(`${this.baseUrl}/compare/${head.branch}`)}?${query.toString()}`;
+		}
+
+		const [owner] = head.remote.path.split('/', 1);
+		return `${this.encodeUrl(
+			`${this.baseUrl}/compare/${base.branch ?? 'HEAD'}...${owner}:${head.branch}`,
+		)}?${query.toString()}`;
 	}
 
 	protected getUrlForFile(fileName: string, branch?: string, sha?: string, range?: Range): string {

@@ -312,6 +312,12 @@ interface AIEventDataBase {
 	duration?: number;
 	'input.length'?: number;
 	'output.length'?: number;
+	'usage.promptTokens'?: number;
+	'usage.completionTokens'?: number;
+	'usage.totalTokens'?: number;
+	'usage.limits.used'?: number;
+	'usage.limits.limit'?: number;
+	'usage.limits.resetsOn'?: string;
 	'failed.reason'?: 'user-declined' | 'user-cancelled' | 'error';
 	'failed.error'?: string;
 }
@@ -338,10 +344,15 @@ export interface AIGenerateChangelogEventData extends AIEventDataBase {
 	type: 'changelog';
 }
 
+export interface AIGenerateCreatePullRequestEventData extends AIEventDataBase {
+	type: 'createPullRequest';
+}
+
 type AIGenerateEvent =
 	| AIGenerateCommitEventData
 	| AIGenerateDraftEventData
 	| AIGenerateStashEventData
+	| AIGenerateCreatePullRequestEventData
 	| AIGenerateChangelogEventData;
 
 export type AISwitchModelEvent =
@@ -815,7 +826,9 @@ type SubscriptionActionEventData =
 				| 'sign-in'
 				| 'sign-out'
 				| 'manage'
+				| 'manage-subscription'
 				| 'reactivate'
+				| 'refer-friend'
 				| 'resend-verification'
 				| 'pricing'
 				| 'start-preview-trial';
@@ -869,8 +882,10 @@ type WalkthroughActionNames =
 	| 'open/help-center/streamline-collaboration'
 	| 'open/help-center/interactive-code-history'
 	| 'open/help-center/community-vs-pro'
+	| 'open/help-center/home-view'
 	| 'open/devex-platform'
 	| 'open/drafts'
+	| 'open/home'
 	| 'connect/integrations'
 	| 'open/autolinks'
 	| 'open/graph'
@@ -933,6 +948,8 @@ export type Sources =
 	| 'cloud-patches'
 	| 'commandPalette'
 	| 'deeplink'
+	| 'feature-badge'
+	| 'feature-gate'
 	| 'graph'
 	| 'home'
 	| 'inspect'
@@ -941,6 +958,7 @@ export type Sources =
 	| 'launchpad'
 	| 'launchpad-indicator'
 	| 'launchpad-view'
+	| 'merge-target'
 	| 'notification'
 	| 'patchDetails'
 	| 'prompt'

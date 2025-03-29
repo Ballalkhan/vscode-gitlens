@@ -6,8 +6,9 @@ import type {
 	ManageCloudIntegrationsCommandArgs,
 } from '../../../../../commands/cloudIntegrations';
 import type { IntegrationFeatures } from '../../../../../constants.integrations';
-import { SubscriptionState } from '../../../../../constants.subscription';
+import { SubscriptionPlanId, SubscriptionState } from '../../../../../constants.subscription';
 import type { Source } from '../../../../../constants.telemetry';
+import type { SubscriptionUpgradeCommandArgs } from '../../../../../plus/gk/models/subscription';
 import {
 	hasAccountFromSubscriptionState,
 	isSubscriptionStatePaidOrTrial,
@@ -25,7 +26,7 @@ import '../../../shared/components/overlays/tooltip';
 import '../../../shared/components/feature-badge';
 
 @customElement('gl-integrations-chip')
-export class GLIntegrationsChip extends LitElement {
+export class GlIntegrationsChip extends LitElement {
 	static override shadowRootOptions: ShadowRootInit = {
 		...LitElement.shadowRootOptions,
 		delegatesFocus: true,
@@ -292,7 +293,8 @@ export class GLIntegrationsChip extends LitElement {
 				${showLock
 					? html`<gl-button
 							appearance="toolbar"
-							href="${createCommandLink<Source>('gitlens.plus.upgrade', {
+							href="${createCommandLink<SubscriptionUpgradeCommandArgs>('gitlens.plus.upgrade', {
+								plan: SubscriptionPlanId.Pro,
 								source: 'home',
 								detail: 'integrations',
 							})}"

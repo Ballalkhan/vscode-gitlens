@@ -34,13 +34,16 @@ export type RemoteResource =
 	| {
 			type: RemoteResourceType.CreatePullRequest;
 			base: {
-				branch?: string;
-				remote: { path: string; url: string };
+				branch: string | undefined;
+				remote: { path: string; url: string; name: string };
 			};
 			compare: {
 				branch: string;
-				remote: { path: string; url: string };
+				remote: { path: string; url: string; name: string };
 			};
+			describePullRequest?: (
+				completedResource: RemoteResource & { type: RemoteResourceType.CreatePullRequest },
+			) => Promise<{ summary: string; body: string } | undefined>;
 	  }
 	| {
 			type: RemoteResourceType.File;

@@ -14,7 +14,7 @@ import {
 } from '../../constants.ai';
 import type { AIGenerateDraftEventData, Source, TelemetryEvents } from '../../constants.telemetry';
 import type { Container } from '../../container';
-import { CancellationError } from '../../errors';
+import { CancellationError, GkAIError, GkAIErrorReason } from '../../errors';
 import type { AIFeatures } from '../../features';
 import { isAdvancedFeature } from '../../features';
 import type { GitCommit } from '../../git/models/commit';
@@ -518,6 +518,59 @@ export class AIProviderService implements Disposable {
 		return result != null ? { ...result, parsed: parseSummarizeResult(result.content) } : undefined;
 	}
 
+	async generatePullRequestMessage(
+		repo: Repository,
+		baseRef: string,
+		compareRef: string,
+		source: Source,
+		options?: {
+			cancellation?: CancellationToken;
+			context?: string;
+			generating?: Deferred<AIModel>;
+			progress?: ProgressOptions;
+		},
+	): Promise<AISummarizeResult | undefined> {
+		if (!(await this.ensureFeatureAccess('generateCreatePullRequest', source))) {
+			return undefined;
+		}
+
+		const diff = await repo.git.diff().getDiff?.(compareRef, baseRef, { notation: '...' });
+
+		const log = await this.container.git.commits(repo.path).getLog(`${baseRef}..${compareRef}`);
+		const commits: [string, number][] = [];
+		for (const [_sha, commit] of log?.commits ?? []) {
+			commits.push([commit.message ?? '', commit.date.getTime()]);
+		}
+
+		if (!diff?.contents && !commits.length) {
+			throw new Error('No changes found to generate a pull request message from.');
+		}
+
+		const result = await this.sendRequest(
+			'generate-create-pullRequest',
+			() => ({
+				diff: diff?.contents ?? '',
+				data: commits.sort((a, b) => a[1] - b[1]).map(c => c[0]),
+				context: options?.context ?? '',
+				instructions: configuration.get('ai.generateCreatePullRequest.customInstructions') ?? '',
+			}),
+			m => `Generating pull request details with ${m.name}...`,
+			source,
+			m => ({
+				key: 'ai/generate',
+				data: {
+					type: 'createPullRequest',
+					'model.id': m.id,
+					'model.provider.id': m.provider.id,
+					'model.provider.name': m.provider.name,
+					'retry.count': 0,
+				},
+			}),
+			options,
+		);
+		return result != null ? { ...result, parsed: parseSummarizeResult(result.content) } : undefined;
+	}
+
 	async generateDraftMessage(
 		changesOrRepo: string | string[] | Repository,
 		sourceContext: Source & { type: AIGenerateDraftEventData['draftType'] },
@@ -529,7 +582,7 @@ export class AIProviderService implements Disposable {
 			codeSuggestion?: boolean;
 		},
 	): Promise<AISummarizeResult | undefined> {
-		if (!(await this.ensureFeatureAccess('cloudPatchGenerateTitleAndDescription', sourceContext))) {
+		if (!(await this.ensureFeatureAccess('generateCreateDraft', sourceContext))) {
 			return undefined;
 		}
 
@@ -545,8 +598,8 @@ export class AIProviderService implements Disposable {
 				context: options?.context ?? '',
 				instructions:
 					(options?.codeSuggestion
-						? configuration.get('ai.generateCodeSuggestMessage.customInstructions')
-						: configuration.get('ai.generateCloudPatchMessage.customInstructions')) ?? '',
+						? configuration.get('ai.generateCreateCodeSuggest.customInstructions')
+						: configuration.get('ai.generateCreateCloudPatch.customInstructions')) ?? '',
 			}),
 			m =>
 				`Generating ${options?.codeSuggestion ? 'code suggestion' : 'cloud patch'} description with ${
@@ -704,6 +757,12 @@ export class AIProviderService implements Disposable {
 				: promise);
 
 			telementry.data['output.length'] = result?.content?.length;
+			telementry.data['usage.promptTokens'] = result?.usage?.promptTokens;
+			telementry.data['usage.completionTokens'] = result?.usage?.completionTokens;
+			telementry.data['usage.totalTokens'] = result?.usage?.totalTokens;
+			telementry.data['usage.limits.used'] = result?.usage?.limits?.used;
+			telementry.data['usage.limits.limit'] = result?.usage?.limits?.limit;
+			telementry.data['usage.limits.resetsOn'] = result?.usage?.limits?.resetsOn?.toISOString();
 			this.container.telemetry.sendEvent(
 				telementry.key,
 				{ ...telementry.data, duration: Date.now() - start },
@@ -723,6 +782,48 @@ export class AIProviderService implements Disposable {
 				},
 				source,
 			);
+
+			if (ex instanceof GkAIError) {
+				switch (ex.reason) {
+					case GkAIErrorReason.Entitlement:
+						void window.showErrorMessage(
+							'You do not have the required entitlement or are over the limits to use this AI feature',
+						);
+						return undefined;
+					case GkAIErrorReason.RequestTooLarge:
+						void window.showErrorMessage(
+							'Your request is too large. Please reduce the size of your request and try again.',
+						);
+						return undefined;
+					case GkAIErrorReason.UserQuotaExceeded: {
+						const increaseLimit: MessageItem = { title: 'Increase Limit' };
+						const result = await window.showErrorMessage(
+							"Your request could not be completed because you've reached the weekly Al usage limit for your current plan. Upgrade to unlock more Al-powered actions.",
+							increaseLimit,
+						);
+
+						if (result === increaseLimit) {
+							void this.container.subscription.manageSubscription(source);
+						}
+
+						return undefined;
+					}
+					case GkAIErrorReason.RateLimitExceeded:
+						void window.showErrorMessage(
+							'Rate limit exceeded. Please wait a few moments and try again later.',
+						);
+						return undefined;
+					case GkAIErrorReason.ServiceCapacityExceeded: {
+						void window.showErrorMessage(
+							'GitKraken AI is temporarily unable to process your request due to high volume. Please wait a few moments and try again. If this issue persists, please contact support.',
+							'OK',
+						);
+						return undefined;
+					}
+				}
+
+				return undefined;
+			}
 
 			throw ex;
 		}
