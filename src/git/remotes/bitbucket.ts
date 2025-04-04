@@ -1,8 +1,11 @@
 import type { Range, Uri } from 'vscode';
 import type { AutolinkReference, DynamicAutolinkReference } from '../../autolinks/models/autolinks';
+import type { RepositoryDescriptor } from '../../plus/integrations/integration';
 import type { Brand, Unbrand } from '../../system/brand';
+import type { CreatePullRequestRemoteResource } from '../models/remoteResource';
 import type { Repository } from '../models/repository';
 import type { GkProviderId } from '../models/repositoryIdentities';
+import type { GitRevisionRangeNotation } from '../models/revision';
 import { isSha } from '../utils/revision.utils';
 import type { RemoteProviderId } from './remoteProvider';
 import { RemoteProvider } from './remoteProvider';
@@ -10,7 +13,7 @@ import { RemoteProvider } from './remoteProvider';
 const fileRegex = /^\/([^/]+)\/([^/]+?)\/src(.+)$/i;
 const rangeRegex = /^lines-(\d+)(?::(\d+))?$/;
 
-export class BitbucketRemote extends RemoteProvider {
+export class BitbucketRemote extends RemoteProvider<RepositoryDescriptor> {
 	constructor(domain: string, path: string, protocol?: string, name?: string, custom: boolean = false) {
 		super(domain, path, protocol, name, custom);
 	}
@@ -142,8 +145,14 @@ export class BitbucketRemote extends RemoteProvider {
 		return this.encodeUrl(`${this.baseUrl}/commits/${sha}`);
 	}
 
-	protected override getUrlForComparison(base: string, compare: string, _notation: '..' | '...'): string {
-		return this.encodeUrl(`${this.baseUrl}/branches/compare/${base}%0D${compare}`).replace('%250D', '%0D');
+	protected override getUrlForComparison(base: string, head: string, _notation: GitRevisionRangeNotation): string {
+		return `${this.encodeUrl(`${this.baseUrl}/branches/compare/${head}\r${base}`)}#diff`;
+	}
+
+	protected override getUrlForCreatePullRequest({ base, head }: CreatePullRequestRemoteResource): string | undefined {
+		const { owner, name } = this.repoDesc;
+		const query = new URLSearchParams({ source: head.branch, dest: `${owner}/${name}::${base.branch ?? ''}` });
+		return `${this.encodeUrl(`${this.getRepoBaseUrl(head.remote.path)}/pull-requests/new`)}?${query.toString()}`;
 	}
 
 	protected getUrlForFile(fileName: string, branch?: string, sha?: string, range?: Range): string {

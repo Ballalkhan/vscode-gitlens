@@ -17,6 +17,7 @@ import { SubscriptionPlanId } from '../constants.subscription';
 import type { Container } from '../container';
 import { AccessDeniedError, ProviderNotFoundError, ProviderNotSupportedError } from '../errors';
 import type { FeatureAccess, Features, PlusFeatures, RepoFeatureAccess } from '../features';
+import { isAdvancedFeature, isProFeatureOnAllRepos } from '../features';
 import type { Subscription } from '../plus/gk/models/subscription';
 import type { SubscriptionChangeEvent } from '../plus/gk/subscriptionService';
 import { isSubscriptionPaidPlan } from '../plus/gk/utils/subscription.utils';
@@ -69,7 +70,7 @@ import { createSubProviderProxyForRepo } from './gitProvider';
 import type { GitUri } from './gitUri';
 import type { GitBlame, GitBlameLine } from './models/blame';
 import type { GitBranch } from './models/branch';
-import type { GitDiffFile, GitDiffLine } from './models/diff';
+import type { GitLineDiff, ParsedGitDiffHunks } from './models/diff';
 import type { GitFile } from './models/file';
 import type { GitBranchReference, GitReference } from './models/reference';
 import type { GitRemote } from './models/remote';
@@ -775,15 +776,7 @@ export class GitProviderService implements Disposable {
 			return { allowed: subscription.account?.verified !== false, subscription: { current: subscription } };
 		}
 
-		if (
-			feature === 'launchpad' ||
-			feature === 'startWork' ||
-			feature === 'associateIssueWithBranch' ||
-			feature === 'generateStashMessage' ||
-			feature === 'explainCommit' ||
-			feature === 'cloudPatchGenerateTitleAndDescription' ||
-			feature === 'generateChangelog'
-		) {
+		if (feature != null && (isProFeatureOnAllRepos(feature) || isAdvancedFeature(feature))) {
 			return { allowed: false, subscription: { current: subscription, required: SubscriptionPlanId.Pro } };
 		}
 
@@ -1698,7 +1691,7 @@ export class GitProviderService implements Disposable {
 	 * @param ref1 Commit to diff from
 	 * @param ref2 Commit to diff to
 	 */
-	getDiffForFile(uri: GitUri, ref1: string | undefined, ref2?: string): Promise<GitDiffFile | undefined> {
+	getDiffForFile(uri: GitUri, ref1: string | undefined, ref2?: string): Promise<ParsedGitDiffHunks | undefined> {
 		const { provider } = this.getProvider(uri);
 		return provider.getDiffForFile(uri, ref1, ref2);
 	}
@@ -1710,7 +1703,7 @@ export class GitProviderService implements Disposable {
 	 * @param ref Commit to diff from
 	 * @param contents Contents to use for the diff
 	 */
-	getDiffForFileContents(uri: GitUri, ref: string, contents: string): Promise<GitDiffFile | undefined> {
+	getDiffForFileContents(uri: GitUri, ref: string, contents: string): Promise<ParsedGitDiffHunks | undefined> {
 		const { provider } = this.getProvider(uri);
 		return provider.getDiffForFileContents(uri, ref, contents);
 	}
@@ -1728,7 +1721,7 @@ export class GitProviderService implements Disposable {
 		editorLine: number,
 		ref1: string | undefined,
 		ref2?: string,
-	): Promise<GitDiffLine | undefined> {
+	): Promise<GitLineDiff | undefined> {
 		const { provider } = this.getProvider(uri);
 		return provider.getDiffForLine(uri, editorLine, ref1, ref2);
 	}

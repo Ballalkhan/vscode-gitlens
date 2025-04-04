@@ -1,16 +1,18 @@
 import type { Range, Uri } from 'vscode';
 import { env } from 'vscode';
 import type { AutolinkReference, DynamicAutolinkReference } from '../../autolinks/models/autolinks';
+import type { Source } from '../../constants.telemetry';
 import type { ResourceDescriptor } from '../../plus/integrations/integration';
 import { openUrl } from '../../system/-webview/vscode';
 import { memoize } from '../../system/decorators/-webview/memoize';
 import { encodeUrl } from '../../system/encoding';
 import { getSettledValue } from '../../system/promise';
 import type { ProviderReference } from '../models/remoteProvider';
-import type { RemoteResource } from '../models/remoteResource';
+import type { CreatePullRequestRemoteResource, RemoteResource } from '../models/remoteResource';
 import { RemoteResourceType } from '../models/remoteResource';
 import type { Repository } from '../models/repository';
 import type { GkProviderId } from '../models/repositoryIdentities';
+import type { GitRevisionRangeNotation } from '../models/revision';
 
 export type RemoteProviderId =
 	| 'azure-devops'
@@ -20,10 +22,14 @@ export type RemoteProviderId =
 	| 'gerrit'
 	| 'gitea'
 	| 'github'
-	| 'cloud-github-enterprise'
-	| 'cloud-gitlab-self-hosted'
+	| 'cloud-github-enterprise' // TODO@eamodio this shouldn't really be here, since it's not a valid remote provider id
+	| 'cloud-gitlab-self-hosted' // TODO@eamodio this shouldn't really be here, since it's not a valid remote provider id
 	| 'gitlab'
 	| 'google-source';
+
+export interface RemoteProviderSupportedFeatures {
+	createPullRequestWithDetails?: boolean;
+}
 
 export abstract class RemoteProvider<T extends ResourceDescriptor = ResourceDescriptor> implements ProviderReference {
 	protected readonly _name: string | undefined;
@@ -98,9 +104,12 @@ export abstract class RemoteProvider<T extends ResourceDescriptor = ResourceDesc
 	abstract get id(): RemoteProviderId;
 	abstract get gkProviderId(): GkProviderId | undefined;
 	abstract get name(): string;
+	get supportedFeatures(): RemoteProviderSupportedFeatures {
+		return {};
+	}
 
 	async copy(resource: RemoteResource | RemoteResource[]): Promise<void> {
-		const urls = this.getUrlsFromResources(resource);
+		const urls = await this.getUrlsFromResources(resource);
 		if (!urls.length) return;
 
 		await env.clipboard.writeText(urls.join('\n'));
@@ -113,14 +122,14 @@ export abstract class RemoteProvider<T extends ResourceDescriptor = ResourceDesc
 	): Promise<{ uri: Uri; startLine?: number; endLine?: number } | undefined>;
 
 	async open(resource: RemoteResource | RemoteResource[]): Promise<boolean | undefined> {
-		const urls = this.getUrlsFromResources(resource);
+		const urls = await this.getUrlsFromResources(resource);
 		if (!urls.length) return false;
 
 		const results = await Promise.allSettled(urls.map(openUrl));
 		return results.every(r => getSettledValue(r) === true);
 	}
 
-	url(resource: RemoteResource): string | undefined {
+	url(resource: RemoteResource, source?: Source): Promise<string | undefined> | string | undefined {
 		switch (resource.type) {
 			case RemoteResourceType.Branch:
 				return this.getUrlForBranch(resource.branch);
@@ -128,12 +137,10 @@ export abstract class RemoteProvider<T extends ResourceDescriptor = ResourceDesc
 				return this.getUrlForBranches();
 			case RemoteResourceType.Commit:
 				return this.getUrlForCommit(resource.sha);
-			case RemoteResourceType.Comparison: {
-				return this.getUrlForComparison?.(resource.base, resource.compare, resource.notation ?? '...');
-			}
-			case RemoteResourceType.CreatePullRequest: {
-				return this.getUrlForCreatePullRequest?.(resource.base, resource.compare);
-			}
+			case RemoteResourceType.Comparison:
+				return this.getUrlForComparison(resource.base, resource.head, resource.notation ?? '...');
+			case RemoteResourceType.CreatePullRequest:
+				return this.getUrlForCreatePullRequest(resource, source);
 			case RemoteResourceType.File:
 				return this.getUrlForFile(
 					resource.fileName,
@@ -159,7 +166,11 @@ export abstract class RemoteProvider<T extends ResourceDescriptor = ResourceDesc
 	}
 
 	protected get baseUrl(): string {
-		return `${this.protocol}://${this.domain}/${this.path}`;
+		return this.getRepoBaseUrl(this.path);
+	}
+
+	protected getRepoBaseUrl(path: string): string {
+		return `${this.protocol}://${this.domain}/${path}`;
 	}
 
 	protected formatName(name: string): string {
@@ -180,12 +191,20 @@ export abstract class RemoteProvider<T extends ResourceDescriptor = ResourceDesc
 
 	protected abstract getUrlForCommit(sha: string): string;
 
-	protected getUrlForComparison?(base: string, compare: string, notation: '..' | '...'): string | undefined;
-
-	protected getUrlForCreatePullRequest?(
-		base: { branch?: string; remote: { path: string; url: string } },
-		compare: { branch: string; remote: { path: string; url: string } },
+	protected abstract getUrlForComparison(
+		base: string,
+		head: string,
+		notation: GitRevisionRangeNotation,
 	): string | undefined;
+
+	async isReadyForForCrossForkPullRequestUrls(): Promise<boolean> {
+		return Promise.resolve(true);
+	}
+
+	protected abstract getUrlForCreatePullRequest(
+		resource: CreatePullRequestRemoteResource,
+		source?: Source,
+	): string | undefined | Promise<string | undefined>;
 
 	protected abstract getUrlForFile(fileName: string, branch?: string, sha?: string, range?: Range): string;
 
@@ -199,22 +218,19 @@ export abstract class RemoteProvider<T extends ResourceDescriptor = ResourceDesc
 		return encodeUrl(url)?.replace(/#/g, '%23');
 	}
 
-	private getUrlsFromResources(resource: RemoteResource | RemoteResource[]): string[] {
-		const urls: string[] = [];
+	private async getUrlsFromResources(resource: RemoteResource | RemoteResource[]): Promise<string[]> {
+		const urlPromises: (Promise<string | undefined> | string | undefined)[] = [];
 
 		if (Array.isArray(resource)) {
 			for (const r of resource) {
-				const url = this.url(r);
-				if (url == null) continue;
-
-				urls.push(url);
+				urlPromises.push(this.url(r));
 			}
 		} else {
-			const url = this.url(resource);
-			if (url != null) {
-				urls.push(url);
-			}
+			urlPromises.push(this.url(resource));
 		}
+		const urls: string[] = (await Promise.allSettled(urlPromises))
+			.map(r => getSettledValue(r))
+			.filter(r => r != null);
 		return urls;
 	}
 }

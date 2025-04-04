@@ -6,6 +6,10 @@ import type {
 	MaybeEnrichedAutolink,
 } from '../../autolinks/models/autolinks';
 import { GlyphChars } from '../../constants';
+import type { Source } from '../../constants.telemetry';
+import type { Container } from '../../container';
+import { HostingIntegration } from '../../plus/integrations/integration';
+import { remoteProviderIdToIntegrationId } from '../../plus/integrations/integrationService';
 import type { GitLabRepositoryDescriptor } from '../../plus/integrations/providers/gitlab';
 import type { Brand, Unbrand } from '../../system/brand';
 import { fromNow } from '../../system/date';
@@ -13,11 +17,14 @@ import { memoize } from '../../system/decorators/-webview/memoize';
 import { encodeUrl } from '../../system/encoding';
 import { escapeMarkdown, unescapeMarkdown } from '../../system/markdown';
 import { equalsIgnoreCase } from '../../system/string';
+import type { CreatePullRequestRemoteResource } from '../models/remoteResource';
 import type { Repository } from '../models/repository';
 import type { GkProviderId } from '../models/repositoryIdentities';
+import type { GitRevisionRangeNotation } from '../models/revision';
 import { getIssueOrPullRequestMarkdownIcon } from '../utils/-webview/icons';
+import { describePullRequestWithAI } from '../utils/-webview/pullRequest.utils';
 import { isSha } from '../utils/revision.utils';
-import type { RemoteProviderId } from './remoteProvider';
+import type { RemoteProviderId, RemoteProviderSupportedFeatures } from './remoteProvider';
 import { RemoteProvider } from './remoteProvider';
 
 const autolinkFullIssuesRegex = /\b([^/\s]+\/[^/\s]+?)(?:\\)?#([0-9]+)\b(?!]\()/g;
@@ -30,7 +37,14 @@ function isGitLabDotCom(domain: string): boolean {
 }
 
 export class GitLabRemote extends RemoteProvider<GitLabRepositoryDescriptor> {
-	constructor(domain: string, path: string, protocol?: string, name?: string, custom: boolean = false) {
+	constructor(
+		private readonly container: Container,
+		domain: string,
+		path: string,
+		protocol?: string,
+		name?: string,
+		custom: boolean = false,
+	) {
 		super(domain, path, protocol, name, custom);
 	}
 
@@ -295,6 +309,13 @@ export class GitLabRemote extends RemoteProvider<GitLabRepositoryDescriptor> {
 		return { key: this.remoteKey, owner: owner, name: repo };
 	}
 
+	override get supportedFeatures(): RemoteProviderSupportedFeatures {
+		return {
+			...super.supportedFeatures,
+			createPullRequestWithDetails: true,
+		};
+	}
+
 	async getLocalInfoFromRemoteUri(
 		repository: Repository,
 		uri: Uri,
@@ -372,8 +393,62 @@ export class GitLabRemote extends RemoteProvider<GitLabRepositoryDescriptor> {
 		return this.encodeUrl(`${this.baseUrl}/-/commit/${sha}`);
 	}
 
-	protected override getUrlForComparison(base: string, compare: string, notation: '..' | '...'): string {
-		return this.encodeUrl(`${this.baseUrl}/-/compare/${base}${notation}${compare}`);
+	protected override getUrlForComparison(base: string, head: string, notation: GitRevisionRangeNotation): string {
+		return this.encodeUrl(`${this.baseUrl}/-/compare/${base}${notation}${head}`);
+	}
+
+	override async isReadyForForCrossForkPullRequestUrls(): Promise<boolean> {
+		const integrationId = remoteProviderIdToIntegrationId(this.id);
+		const integration = integrationId && (await this.container.integrations.get(integrationId));
+		return integration?.maybeConnected ?? integration?.isConnected() ?? false;
+	}
+
+	protected override async getUrlForCreatePullRequest(
+		resource: CreatePullRequestRemoteResource,
+		source?: Source,
+	): Promise<string | undefined> {
+		let { base, head, details } = resource;
+
+		if (details?.describeWithAI) {
+			details = await describePullRequestWithAI(
+				this.container,
+				resource.repoPath,
+				resource,
+				source ?? { source: 'ai' },
+			);
+		}
+		const query = new URLSearchParams({
+			utf8: '✓',
+			'merge_request[source_branch]': head.branch,
+			'merge_request[target_branch]': base.branch ?? '',
+		});
+
+		if (base.remote.url !== head.remote.url) {
+			const targetDesc = {
+				owner: base.remote.path.split('/')[0],
+				name: base.remote.path.split('/')[1],
+			};
+			const integrationId = remoteProviderIdToIntegrationId(this.id);
+			const integration = integrationId && (await this.container.integrations.get(integrationId));
+
+			let targetRepoId;
+			if (integration?.isConnected && integration instanceof HostingIntegration) {
+				targetRepoId = (await integration.getRepoInfo?.(targetDesc))?.id;
+			}
+			if (!targetRepoId) return undefined;
+
+			query.set('merge_request[target_project_id]', targetRepoId);
+			// 'merge_request["source_project_id"]': this.path, // ?? seems we don't need it
+		}
+
+		if (details?.title) {
+			query.set('merge_request[title]', details.title);
+		}
+		if (details?.description) {
+			query.set('merge_request[description]', details.description);
+		}
+
+		return `${this.encodeUrl(`${this.getRepoBaseUrl(head.remote.path)}/-/merge_requests/new`)}?${query.toString()}`;
 	}
 
 	protected getUrlForFile(fileName: string, branch?: string, sha?: string, range?: Range): string {

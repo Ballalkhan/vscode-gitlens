@@ -1,8 +1,9 @@
 import type { Disposable } from 'vscode';
+import type { Response } from '@env/fetch';
 import { fetch } from '@env/fetch';
 import { gitKrakenProviderDescriptor as provider } from '../../constants.ai';
 import type { Container } from '../../container';
-import { AuthenticationRequiredError } from '../../errors';
+import { AIError, AIErrorReason, AuthenticationRequiredError } from '../../errors';
 import { debug } from '../../system/decorators/log';
 import { Logger } from '../../system/logger';
 import { getLogScope } from '../../system/logger.scope';
@@ -35,6 +36,18 @@ export class GitKrakenProvider extends OpenAICompatibleProvider<typeof provider.
 
 	override dispose(): void {
 		this._disposable.dispose();
+	}
+
+	override async getApiKey(silent: boolean): Promise<string | undefined> {
+		let session = await this.container.subscription.getAuthenticationSession();
+		if (session?.accessToken) return session.accessToken;
+		if (silent) return undefined;
+
+		const result = await ensureAccount(this.container, silent);
+		if (!result) return undefined;
+
+		session = await this.container.subscription.getAuthenticationSession();
+		return session?.accessToken;
 	}
 
 	@debug()
@@ -141,18 +154,6 @@ export class GitKrakenProvider extends OpenAICompatibleProvider<typeof provider.
 		return super.getPromptTemplate(action, model);
 	}
 
-	protected override async getApiKey(silent: boolean): Promise<string | undefined> {
-		let session = await this.container.subscription.getAuthenticationSession();
-		if (session?.accessToken) return session.accessToken;
-		if (silent) return undefined;
-
-		const result = await ensureAccount(this.container, silent);
-		if (!result) return undefined;
-
-		session = await this.container.subscription.getAuthenticationSession();
-		return session?.accessToken;
-	}
-
 	protected getUrl(_model: AIModel<typeof provider.id>): string {
 		return this.container.urls.getGkAIApiUrl('chat/completions');
 	}
@@ -167,5 +168,118 @@ export class GitKrakenProvider extends OpenAICompatibleProvider<typeof provider.
 			Accept: 'application/json',
 			'GK-Action': action,
 		});
+	}
+
+	protected override async handleFetchFailure<TAction extends AIActionType>(
+		rsp: Response,
+		_action: TAction,
+		_model: AIModel<typeof provider.id>,
+		retries: number,
+		maxInputTokens: number,
+	): Promise<{ retry: true; maxInputTokens: number }> {
+		type ErrorResponse = {
+			error?: { code: string; message: string; data?: any };
+		};
+
+		let json;
+		try {
+			json = (await rsp.json()) as ErrorResponse | undefined;
+		} catch {}
+
+		let message = json?.error?.message || rsp.statusText;
+
+		let status: string | number;
+		let code: string | number;
+		[status, code] = json?.error?.code?.split('.') ?? [];
+
+		status = status ? parseInt(status, 10) : rsp.status;
+		code = code ? parseInt(code, 10) : 0;
+
+		switch (status) {
+			case 400: // Bad Request
+				// CodeValidation         = "400.1"
+				throw new Error(`(${this.name}) ${status}.${code}: ${message}`);
+			case 401:
+				// CodeAuthentication     = "401.1"
+				throw new AuthenticationRequiredError();
+			case 403:
+				// CodeAuthorization      = "403.1"
+				// CodeEntitlement        = "403.2"
+
+				// Entitlement Error
+				if (code === 2) {
+					type EntitlementErrorData = {
+						entitlementId?: string;
+						entitlementValue?: string | number;
+						currentValue?: string | number;
+					};
+
+					const data = json?.error?.data as EntitlementErrorData;
+					const entitlementId = data?.entitlementId;
+					if (entitlementId != null) {
+						message += `; entitlement=${data.entitlementId} ${JSON.stringify(data)}`;
+					}
+
+					throw new AIError(
+						entitlementId === 'ai.tokens.weekly'
+							? AIErrorReason.UserQuotaExceeded
+							: AIErrorReason.Entitlement,
+						new Error(`(${this.name}) ${status}.${code}: ${message}`),
+					);
+				}
+				throw new Error(`(${this.name}) ${status}.${code}: ${message}`);
+			case 404:
+				// CodeNotFound           = "404.1"
+				throw new Error(`(${this.name}) ${status}.${code}: ${message}`);
+			case 408:
+				// CodeTimeout            = "408.1"
+				throw new Error(`(${this.name}) ${status}.${code}: ${message}`);
+			case 413:
+				// CodeRequestTooLarge    = "413.1"
+
+				// Request too large
+				if (code === 1) {
+					if (retries < 2) {
+						return { retry: true, maxInputTokens: maxInputTokens - 200 * (retries || 1) };
+					}
+					throw new AIError(
+						AIErrorReason.RequestTooLarge,
+						new Error(`(${this.name}) ${status}.${code}: ${message}`),
+					);
+				}
+				throw new Error(`(${this.name}) ${status}.${code}: ${message}`);
+			case 429:
+				// CodeTooManyRequests    = "429.1"
+
+				// Too many requests
+				if (code === 1) {
+					throw new AIError(
+						AIErrorReason.RateLimitExceeded,
+						new Error(`(${this.name}) ${status}.${code}: ${message}`),
+					);
+				}
+				throw new Error(`(${this.name}) ${status}.${code}: ${message}`);
+			case 499:
+				// CodeRequestCanceled    = "499.1"
+				throw new Error(`(${this.name}) ${status}.${code}: ${message}`);
+			case 500:
+				// CodeServerError        = "500.1"
+				throw new Error(`(${this.name}) ${status}.${code}: ${message}`);
+			case 503:
+				// CodeServiceUnavailable = "503.1"
+
+				// Service unavailable
+				if (code === 1) {
+					if (message === 'Agent Error: too many requests') {
+						throw new AIError(
+							AIErrorReason.ServiceCapacityExceeded,
+							new Error(`(${this.name}) ${status}.${code}: ${message}`),
+						);
+					}
+				}
+				throw new Error(`(${this.name}) ${status}.${code}: ${message}`);
+			default:
+				throw new Error(`(${this.name}) ${status}.${code}: ${message}`);
+		}
 	}
 }

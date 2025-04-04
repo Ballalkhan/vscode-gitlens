@@ -269,3 +269,65 @@ export class RequestsAreBlockedTemporarilyError extends Error {
 		Error.captureStackTrace?.(this, RequestsAreBlockedTemporarilyError);
 	}
 }
+
+export class RequiresIntegrationError extends Error {
+	constructor(message: string) {
+		super(message);
+		Error.captureStackTrace?.(this, RequiresIntegrationError);
+	}
+}
+
+export const enum AIErrorReason {
+	NoRequestData,
+	Entitlement,
+	RequestTooLarge,
+	UserQuotaExceeded,
+	RateLimitExceeded,
+	ServiceCapacityExceeded,
+}
+
+export class AIError extends Error {
+	readonly original?: Error;
+	readonly reason: AIErrorReason | undefined;
+
+	constructor(reason: AIErrorReason, original?: Error) {
+		let message;
+		switch (reason) {
+			case AIErrorReason.Entitlement:
+				message = 'You do not have the required entitlement to use this feature';
+				break;
+			case AIErrorReason.RequestTooLarge:
+				message = 'The request is too large';
+				break;
+			case AIErrorReason.UserQuotaExceeded:
+				message = 'You have exceeded your user token limit';
+				break;
+			case AIErrorReason.RateLimitExceeded:
+				message = 'Rate limit exceeded';
+				break;
+			case AIErrorReason.ServiceCapacityExceeded:
+				message = 'Service capacity exceeded';
+				break;
+			case AIErrorReason.NoRequestData:
+				message = original?.message ?? 'No data was provided for the request';
+				break;
+			default:
+				message = original?.message ?? 'An unknown error occurred';
+				break;
+		}
+
+		super(message);
+
+		this.original = original;
+		this.reason = reason;
+		Error.captureStackTrace?.(this, AIError);
+	}
+}
+
+export class AINoRequestDataError extends AIError {
+	constructor(message?: string) {
+		super(AIErrorReason.NoRequestData, message ? new Error(message) : undefined);
+
+		Error.captureStackTrace?.(this, AINoRequestDataError);
+	}
+}

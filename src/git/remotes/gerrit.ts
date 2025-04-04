@@ -1,7 +1,9 @@
 import type { Range, Uri } from 'vscode';
 import type { AutolinkReference, DynamicAutolinkReference } from '../../autolinks/models/autolinks';
+import type { CreatePullRequestRemoteResource } from '../models/remoteResource';
 import type { Repository } from '../models/repository';
 import type { GkProviderId } from '../models/repositoryIdentities';
+import type { GitRevisionRangeNotation } from '../models/revision';
 import { isSha } from '../utils/revision.utils';
 import type { RemoteProviderId } from './remoteProvider';
 import { RemoteProvider } from './remoteProvider';
@@ -187,6 +189,20 @@ export class GerritRemote extends RemoteProvider {
 
 	protected getUrlForCommit(sha: string): string {
 		return this.encodeUrl(`${this.baseReviewUrl}/q/${sha}`);
+	}
+
+	protected override getUrlForComparison(
+		base: string,
+		head: string,
+		notation: GitRevisionRangeNotation,
+	): string | undefined {
+		return this.encodeUrl(`${this.baseReviewUrl}/q/${base}${notation}${head}`);
+	}
+
+	protected override getUrlForCreatePullRequest({ base, head }: CreatePullRequestRemoteResource): string | undefined {
+		const query = new URLSearchParams({ sourceBranch: head.branch, targetBranch: base.branch ?? '' });
+
+		return this.encodeUrl(`${this.baseReviewUrl}/createPullRequest?${query.toString()}`);
 	}
 
 	protected getUrlForFile(fileName: string, branch?: string, sha?: string, range?: Range): string {

@@ -1,5 +1,6 @@
 import type { Container } from '../container';
 import { RemoteResourceType } from '../git/models/remoteResource';
+import type { GitRevisionRangeNotation } from '../git/models/revision';
 import { showGenericErrorMessage } from '../messages';
 import { command, executeCommand } from '../system/-webview/command';
 import { Logger } from '../system/logger';
@@ -11,7 +12,7 @@ export interface OpenComparisonOnRemoteCommandArgs {
 	clipboard?: boolean;
 	ref1?: string;
 	ref2?: string;
-	notation?: '..' | '...';
+	notation?: GitRevisionRangeNotation;
 	repoPath?: string;
 }
 
@@ -62,7 +63,7 @@ export class OpenComparisonOnRemoteCommand extends GlCommandBase {
 				resource: {
 					type: RemoteResourceType.Comparison,
 					base: args.ref1,
-					compare: args.ref2,
+					head: args.ref2,
 					notation: args.notation,
 				},
 				repoPath: args.repoPath,

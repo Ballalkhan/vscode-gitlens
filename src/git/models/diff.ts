@@ -1,44 +1,11 @@
-import type { GitFileChange } from './fileChange';
+import type { GitFileChange, GitFileChangeShape } from './fileChange';
+import type { GitRevisionRangeNotation } from './revision';
 
 export interface GitDiff {
 	readonly contents: string;
 	readonly from: string;
 	readonly to: string;
-}
-
-export interface GitDiffHunkLine {
-	current: string | undefined;
-	previous: string | undefined;
-	state: 'added' | 'changed' | 'removed' | 'unchanged';
-}
-
-export interface GitDiffHunk {
-	readonly contents: string;
-	readonly current: {
-		readonly count: number;
-		readonly position: { readonly start: number; readonly end: number };
-	};
-	readonly previous: {
-		readonly count: number;
-		readonly position: { readonly start: number; readonly end: number };
-	};
-	readonly lines: Map<number, GitDiffHunkLine>;
-}
-
-export interface GitDiffFile {
-	readonly hunks: GitDiffHunk[];
-	readonly contents?: string;
-}
-
-export interface GitDiffLine {
-	readonly hunk: GitDiffHunk;
-	readonly line: GitDiffHunkLine;
-}
-
-export interface GitDiffShortStat {
-	readonly files: number;
-	readonly additions: number;
-	readonly deletions: number;
+	readonly notation: GitRevisionRangeNotation | undefined;
 }
 
 export interface GitDiffFiles {
@@ -52,3 +19,45 @@ export interface GitDiffFileStats {
 }
 
 export type GitDiffFilter = 'A' | 'C' | 'D' | 'M' | 'R' | 'T' | 'U' | 'X' | 'B' | '*';
+
+export interface GitDiffShortStat {
+	readonly files: number;
+	readonly additions: number;
+	readonly deletions: number;
+}
+
+export interface GitLineDiff {
+	readonly hunk: ParsedGitDiffHunk;
+	readonly line: ParsedGitDiffHunkLine;
+}
+
+export interface ParsedGitDiff {
+	readonly files: ParsedGitDiffFile[];
+	readonly contents?: string;
+}
+
+export interface ParsedGitDiffFile extends Omit<GitFileChangeShape, 'repoPath'>, ParsedGitDiffHunks {}
+
+export interface ParsedGitDiffHunks {
+	readonly hunks: ParsedGitDiffHunk[];
+	readonly contents?: string;
+}
+
+export interface ParsedGitDiffHunk {
+	readonly contents: string;
+	readonly current: {
+		readonly count: number;
+		readonly position: { readonly start: number; readonly end: number };
+	};
+	readonly previous: {
+		readonly count: number;
+		readonly position: { readonly start: number; readonly end: number };
+	};
+	readonly lines: Map<number, ParsedGitDiffHunkLine>;
+}
+
+export interface ParsedGitDiffHunkLine {
+	current: string | undefined;
+	previous: string | undefined;
+	state: 'added' | 'changed' | 'removed' | 'unchanged';
+}
