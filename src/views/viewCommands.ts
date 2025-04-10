@@ -5,6 +5,8 @@ import type { CreatePullRequestActionContext, OpenPullRequestActionContext } fro
 import type { DiffWithCommandArgs } from '../commands/diffWith';
 import type { DiffWithPreviousCommandArgs } from '../commands/diffWithPrevious';
 import type { DiffWithWorkingCommandArgs } from '../commands/diffWithWorking';
+import type { GenerateChangelogCommandArgs } from '../commands/generateChangelog';
+import { generateChangelogAndOpenMarkdownDocument } from '../commands/generateChangelog';
 import type { OpenFileAtRevisionCommandArgs } from '../commands/openFileAtRevision';
 import type { OpenOnRemoteCommandArgs } from '../commands/openOnRemote';
 import type { ViewShowBranchComparison } from '../config';
@@ -48,8 +50,12 @@ import {
 } from '../system/-webview/command';
 import { configuration } from '../system/-webview/configuration';
 import { setContext } from '../system/-webview/context';
-import type { MergeEditorInputs, OpenWorkspaceLocation } from '../system/-webview/vscode';
-import { openMergeEditor, openUrl, openWorkspace, revealInFileExplorer } from '../system/-webview/vscode';
+import { revealInFileExplorer } from '../system/-webview/vscode';
+import type { MergeEditorInputs } from '../system/-webview/vscode/editors';
+import { openMergeEditor } from '../system/-webview/vscode/editors';
+import { openUrl } from '../system/-webview/vscode/uris';
+import type { OpenWorkspaceLocation } from '../system/-webview/vscode/workspaces';
+import { openWorkspace } from '../system/-webview/vscode/workspaces';
 import { filterMap } from '../system/array';
 import { createCommandDecorator } from '../system/decorators/command';
 import { log } from '../system/decorators/log';
@@ -1652,16 +1658,16 @@ export class ViewCommands implements Disposable {
 		let uri = options.revisionUri;
 		if (uri == null) {
 			if (node.isAny('results-file', 'conflict-file')) {
-				uri = this.container.git.getRevisionUri(node.uri);
+				uri = this.container.git.getRevisionUriFromGitUri(node.uri);
 			} else {
 				uri =
 					node.commit.file?.status === 'D'
 						? this.container.git.getRevisionUri(
+								node.commit.repoPath,
 								(await node.commit.getPreviousSha()) ?? deletedOrMissing,
 								node.commit.file.path,
-								node.commit.repoPath,
 						  )
-						: this.container.git.getRevisionUri(node.uri);
+						: this.container.git.getRevisionUriFromGitUri(node.uri);
 			}
 		}
 
@@ -1761,17 +1767,24 @@ export class ViewCommands implements Disposable {
 	private async generateChangelog(node: ResultsCommitsNode) {
 		if (!node.is('results-commits')) return;
 
-		const changes = lazy(() => node.getChangesForChangelog());
-		const result = await this.container.ai.generateChangelog(
-			changes,
-			{ source: 'view' },
+		await generateChangelogAndOpenMarkdownDocument(
+			this.container,
+			lazy(() => node.getChangesForChangelog()),
+			{ source: 'view', detail: 'comparison' },
 			{ progress: { location: ProgressLocation.Notification } },
 		);
-		if (result == null) return;
+	}
 
-		// open an untitled editor
-		const document = await workspace.openTextDocument({ language: 'markdown', content: result.content });
-		await window.showTextDocument(document);
+	@command('gitlens.views.ai.generateChangelogFrom')
+	@log()
+	private async generateChangelogFrom(node: BranchNode | TagNode) {
+		if (!node.is('branch') && !node.is('tag')) return;
+
+		await executeCommand<GenerateChangelogCommandArgs>('gitlens.ai.generateChangelog', {
+			repoPath: node.repoPath,
+			head: node.ref,
+			source: { source: 'view', detail: node.is('branch') ? 'branch' : 'tag' },
+		});
 	}
 }
 

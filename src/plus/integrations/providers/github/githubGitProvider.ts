@@ -35,7 +35,7 @@ import { decodeRemoteHubAuthority } from '../../../../git/gitUri.authority';
 import type { GitBlame, GitBlameAuthor, GitBlameLine } from '../../../../git/models/blame';
 import type { GitCommitLine } from '../../../../git/models/commit';
 import { GitCommit, GitCommitIdentity } from '../../../../git/models/commit';
-import type { GitDiffFile, GitDiffLine } from '../../../../git/models/diff';
+import type { GitLineDiff, ParsedGitDiffHunks } from '../../../../git/models/diff';
 import { GitFileChange } from '../../../../git/models/fileChange';
 import { GitFileIndexStatus } from '../../../../git/models/fileStatus';
 import type { GitLog } from '../../../../git/models/log';
@@ -76,7 +76,7 @@ import { RevisionGitSubProvider } from './sub-providers/revision';
 import { StatusGitSubProvider } from './sub-providers/status';
 import { TagsGitSubProvider } from './sub-providers/tags';
 
-const emptyPromise: Promise<GitBlame | GitDiffFile | GitLog | undefined> = Promise.resolve(undefined);
+const emptyPromise: Promise<GitBlame | ParsedGitDiffHunks | GitLog | undefined> = Promise.resolve(undefined);
 
 const githubAuthenticationScopes = ['repo', 'read:user', 'user:email'];
 
@@ -242,18 +242,12 @@ export class GitHubGitProvider implements GitProvider, Disposable {
 		];
 	}
 
-	// private _supportedFeatures = new Map<Features, boolean>();
 	async supports(feature: Features): Promise<boolean> {
-		// const supported = this._supportedFeatures.get(feature);
-		// if (supported != null) return supported;
-
 		switch (feature) {
-			case 'stashes' satisfies Features:
-			case 'worktrees' satisfies Features:
-			case 'stashOnlyStaged' satisfies Features:
-				return false;
-			default:
+			case 'timeline' satisfies Features:
 				return true;
+			default:
+				return false;
 		}
 	}
 
@@ -335,8 +329,8 @@ export class GitHubGitProvider implements GitProvider, Disposable {
 	}
 
 	@log()
-	async getBestRevisionUri(repoPath: string, path: string, ref: string | undefined): Promise<Uri | undefined> {
-		return ref ? this.createProviderUri(repoPath, ref, path) : this.createVirtualUri(repoPath, ref, path);
+	async getBestRevisionUri(repoPath: string, path: string, rev: string | undefined): Promise<Uri | undefined> {
+		return rev ? this.createProviderUri(repoPath, rev, path) : this.createVirtualUri(repoPath, rev, path);
 	}
 
 	getRelativePath(pathOrUri: string | Uri, base: string | Uri): string {
@@ -379,9 +373,9 @@ export class GitHubGitProvider implements GitProvider, Disposable {
 		return relativePath;
 	}
 
-	getRevisionUri(repoPath: string, path: string, ref: string): Uri {
-		const uri = this.createProviderUri(repoPath, ref, path);
-		return ref === deletedOrMissing ? uri.with({ query: '~' }) : uri;
+	getRevisionUri(repoPath: string, rev: string, path: string): Uri {
+		const uri = this.createProviderUri(repoPath, rev, path);
+		return rev === deletedOrMissing ? uri.with({ query: '~' }) : uri;
 	}
 
 	@log()
@@ -755,7 +749,11 @@ export class GitHubGitProvider implements GitProvider, Disposable {
 	}
 
 	@log()
-	async getDiffForFile(_uri: GitUri, _ref1: string | undefined, _ref2?: string): Promise<GitDiffFile | undefined> {
+	async getDiffForFile(
+		_uri: GitUri,
+		_ref1: string | undefined,
+		_ref2?: string,
+	): Promise<ParsedGitDiffHunks | undefined> {
 		return undefined;
 	}
 
@@ -764,7 +762,11 @@ export class GitHubGitProvider implements GitProvider, Disposable {
 			1: _contents => '<contents>',
 		},
 	})
-	async getDiffForFileContents(_uri: GitUri, _ref: string, _contents: string): Promise<GitDiffFile | undefined> {
+	async getDiffForFileContents(
+		_uri: GitUri,
+		_ref: string,
+		_contents: string,
+	): Promise<ParsedGitDiffHunks | undefined> {
 		return undefined;
 	}
 
@@ -774,7 +776,7 @@ export class GitHubGitProvider implements GitProvider, Disposable {
 		_editorLine: number, // 0-based, Git is 1-based
 		_ref1: string | undefined,
 		_ref2?: string,
-	): Promise<GitDiffLine | undefined> {
+	): Promise<GitLineDiff | undefined> {
 		return undefined;
 	}
 

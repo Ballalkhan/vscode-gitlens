@@ -1,7 +1,8 @@
 import { window } from 'vscode';
+import type { Source } from '../constants.telemetry';
 import type { Container } from '../container';
 import type { GitRemote } from '../git/models/remote';
-import type { RemoteResource } from '../git/models/remoteResource';
+import type { CreatePullRequestRemoteResource } from '../git/models/remoteResource';
 import { RemoteResourceType } from '../git/models/remoteResource';
 import type { RemoteProvider } from '../git/remotes/remoteProvider';
 import { getRemoteNameFromBranchName } from '../git/utils/branch.utils';
@@ -11,12 +12,14 @@ import { GlCommandBase } from './commandBase';
 import type { OpenOnRemoteCommandArgs } from './openOnRemote';
 
 export interface CreatePullRequestOnRemoteCommandArgs {
-	base?: string;
+	base: string | undefined;
 	compare: string;
 	remote: string;
 	repoPath: string;
 
 	clipboard?: boolean;
+	describeWithAI?: boolean;
+	source?: Source;
 }
 
 @command()
@@ -64,16 +67,18 @@ export class CreatePullRequestOnRemoteCommand extends GlCommandBase {
 			sort: true,
 		})) as GitRemote<RemoteProvider>[];
 
-		const resource: RemoteResource = {
+		const resource: CreatePullRequestRemoteResource = {
 			type: RemoteResourceType.CreatePullRequest,
+			repoPath: repo.path,
 			base: {
 				branch: args.base,
 				remote: undefined!,
 			},
-			compare: {
+			head: {
 				branch: args.compare,
-				remote: { path: compareRemote.path, url: compareRemote.url },
+				remote: { path: compareRemote.path, url: compareRemote.url, name: compareRemote.name },
 			},
+			details: args.describeWithAI ? { describeWithAI: true } : undefined,
 		};
 
 		void (await executeCommand<OpenOnRemoteCommandArgs>('gitlens.openOnRemote', {

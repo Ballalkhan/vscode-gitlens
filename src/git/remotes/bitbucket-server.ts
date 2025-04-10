@@ -1,17 +1,29 @@
 import type { Range, Uri } from 'vscode';
 import type { AutolinkReference, DynamicAutolinkReference } from '../../autolinks/models/autolinks';
+import type { Source } from '../../constants.telemetry';
+import type { Container } from '../../container';
 import type { Brand, Unbrand } from '../../system/brand';
+import type { CreatePullRequestRemoteResource } from '../models/remoteResource';
 import type { Repository } from '../models/repository';
 import type { GkProviderId } from '../models/repositoryIdentities';
+import type { GitRevisionRangeNotation } from '../models/revision';
+import { describePullRequestWithAI } from '../utils/-webview/pullRequest.utils';
 import { isSha } from '../utils/revision.utils';
-import type { RemoteProviderId } from './remoteProvider';
+import type { LocalInfoFromRemoteUriResult, RemoteProviderId, RemoteProviderSupportedFeatures } from './remoteProvider';
 import { RemoteProvider } from './remoteProvider';
 
 const fileRegex = /^\/([^/]+)\/([^/]+?)\/src(.+)$/i;
 const rangeRegex = /^lines-(\d+)(?::(\d+))?$/;
 
 export class BitbucketServerRemote extends RemoteProvider {
-	constructor(domain: string, path: string, protocol?: string, name?: string, custom: boolean = false) {
+	constructor(
+		private readonly container: Container,
+		domain: string,
+		path: string,
+		protocol?: string,
+		name?: string,
+		custom: boolean = false,
+	) {
 		super(domain, path, protocol, name, custom);
 	}
 
@@ -80,13 +92,16 @@ export class BitbucketServerRemote extends RemoteProvider {
 		return this.formatName('Bitbucket Server');
 	}
 
-	async getLocalInfoFromRemoteUri(
-		repository: Repository,
-		uri: Uri,
-		options?: { validate?: boolean },
-	): Promise<{ uri: Uri; startLine?: number; endLine?: number } | undefined> {
+	override get supportedFeatures(): RemoteProviderSupportedFeatures {
+		return {
+			...super.supportedFeatures,
+			createPullRequestWithDetails: true,
+		};
+	}
+
+	async getLocalInfoFromRemoteUri(repo: Repository, uri: Uri): Promise<LocalInfoFromRemoteUriResult | undefined> {
 		if (uri.authority !== this.domain) return undefined;
-		if ((options?.validate ?? true) && !uri.path.startsWith(`/${this.path}/`)) return undefined;
+		if (!uri.path.startsWith(`/${this.path}/`)) return undefined;
 
 		let startLine;
 		let endLine;
@@ -109,12 +124,27 @@ export class BitbucketServerRemote extends RemoteProvider {
 		const [, , , path] = match;
 
 		// Check for a permalink
+		let maybeShortPermalink: LocalInfoFromRemoteUriResult | undefined = undefined;
+
 		let index = path.indexOf('/', 1);
 		if (index !== -1) {
 			const sha = path.substring(1, index);
 			if (isSha(sha)) {
-				const uri = repository.toAbsoluteUri(path.substring(index), { validate: options?.validate });
-				if (uri != null) return { uri: uri, startLine: startLine, endLine: endLine };
+				const uri = await repo.getAbsoluteOrBestRevisionUri(path.substring(index), sha);
+				if (uri != null) {
+					return { uri: uri, repoPath: repo.path, rev: sha, startLine: startLine, endLine: endLine };
+				}
+			} else if (isSha(sha, true)) {
+				const uri = await repo.getAbsoluteOrBestRevisionUri(path.substring(index), sha);
+				if (uri != null) {
+					maybeShortPermalink = {
+						uri: uri,
+						repoPath: repo.path,
+						rev: sha,
+						startLine: startLine,
+						endLine: endLine,
+					};
+				}
 			}
 		}
 
@@ -129,20 +159,23 @@ export class BitbucketServerRemote extends RemoteProvider {
 			possibleBranches.set(branch, path.substring(index));
 		} while (index > 0);
 
-		if (possibleBranches.size !== 0) {
-			const { values: branches } = await repository.git.branches().getBranches({
+		if (possibleBranches.size) {
+			const { values: branches } = await repo.git.branches().getBranches({
 				filter: b => b.remote && possibleBranches.has(b.getNameWithoutRemote()),
 			});
 			for (const branch of branches) {
-				const path = possibleBranches.get(branch.getNameWithoutRemote());
+				const ref = branch.getNameWithoutRemote();
+				const path = possibleBranches.get(ref);
 				if (path == null) continue;
 
-				const uri = repository.toAbsoluteUri(path, { validate: options?.validate });
-				if (uri != null) return { uri: uri, startLine: startLine, endLine: endLine };
+				const uri = await repo.getAbsoluteOrBestRevisionUri(path.substring(index), ref);
+				if (uri != null) {
+					return { uri: uri, repoPath: repo.path, rev: ref, startLine: startLine, endLine: endLine };
+				}
 			}
 		}
 
-		return undefined;
+		return maybeShortPermalink;
 	}
 
 	protected getUrlForBranches(): string {
@@ -157,8 +190,37 @@ export class BitbucketServerRemote extends RemoteProvider {
 		return this.encodeUrl(`${this.baseUrl}/commits/${sha}`);
 	}
 
-	protected override getUrlForComparison(base: string, compare: string, _notation: '..' | '...'): string {
-		return this.encodeUrl(`${this.baseUrl}/branches/compare/${base}%0D${compare}`).replace('%250D', '%0D');
+	protected override getUrlForComparison(base: string, head: string, _notation: GitRevisionRangeNotation): string {
+		return this.encodeUrl(`${this.baseUrl}/branches/compare/${base}%0D${head}`).replaceAll('%250D', '%0D');
+	}
+
+	protected override async getUrlForCreatePullRequest(
+		resource: CreatePullRequestRemoteResource,
+		source?: Source,
+	): Promise<string | undefined> {
+		let { base, head, details } = resource;
+
+		if (details?.describeWithAI) {
+			details = await describePullRequestWithAI(
+				this.container,
+				resource.repoPath,
+				resource,
+				source ?? { source: 'ai' },
+			);
+		}
+
+		const query = new URLSearchParams({ sourceBranch: head.branch, targetBranch: base.branch ?? '' });
+		// TODO: figure this out
+		// query.set('targetRepoId', base.repoId);
+
+		if (details?.title) {
+			query.set('title', details.title);
+		}
+		if (details?.description) {
+			query.set('description', details.description);
+		}
+
+		return `${this.encodeUrl(`${this.baseUrl}/pull-requests?create`)}&${query.toString()}`;
 	}
 
 	protected getUrlForFile(fileName: string, branch?: string, sha?: string, range?: Range): string {

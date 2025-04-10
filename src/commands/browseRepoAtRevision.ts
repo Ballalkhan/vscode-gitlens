@@ -3,7 +3,7 @@ import type { Container } from '../container';
 import { GitUri } from '../git/gitUri';
 import { showGenericErrorMessage } from '../messages';
 import { command, executeCoreCommand } from '../system/-webview/command';
-import { openWorkspace } from '../system/-webview/vscode';
+import { openWorkspace } from '../system/-webview/vscode/workspaces';
 import { Logger } from '../system/logger';
 import { basename } from '../system/path';
 import { ActiveEditorCommand } from './commandBase';
@@ -61,7 +61,7 @@ export class BrowseRepoAtRevisionCommand extends ActiveEditorCommand {
 			const sha = args?.before
 				? await this.container.git.refs(gitUri.repoPath!).resolveReference(`${gitUri.sha}^`)
 				: gitUri.sha;
-			uri = this.container.git.getRevisionUri(sha, gitUri.repoPath!, gitUri.repoPath!);
+			uri = this.container.git.getRevisionUri(gitUri.repoPath!, sha, gitUri.repoPath!);
 			gitUri = GitUri.fromRevisionUri(uri);
 
 			openWorkspace(uri, {

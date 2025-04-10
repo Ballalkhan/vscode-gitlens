@@ -8,13 +8,14 @@ import type { Container } from '../container';
 import { CommitFormatter } from '../git/formatters/commitFormatter';
 import { GitUri } from '../git/gitUri';
 import type { GitCommit } from '../git/models/commit';
-import type { GitDiffHunk, GitDiffLine } from '../git/models/diff';
+import type { GitLineDiff, ParsedGitDiffHunk } from '../git/models/diff';
 import type { PullRequest } from '../git/models/pullRequest';
 import type { GitRemote } from '../git/models/remote';
 import { uncommittedStaged } from '../git/models/revision';
 import type { RemoteProvider } from '../git/remotes/remoteProvider';
 import { isUncommittedStaged, shortenRevision } from '../git/utils/revision.utils';
 import { configuration } from '../system/-webview/configuration';
+import { escapeMarkdownCodeBlocks } from '../system/markdown';
 import { getSettledValue, pauseOnCancelOrTimeout, pauseOnCancelOrTimeoutMapTuplePromise } from '../system/promise';
 
 export async function changesMessage(
@@ -44,7 +45,7 @@ export async function changesMessage(
 			previousSha = commitLine.previousSha;
 			ref = previousSha;
 			if (ref == null) {
-				return `\`\`\`diff\n+ ${document.lineAt(editorLine).text}\n\`\`\``;
+				return `\`\`\`diff\n+ ${escapeMarkdownCodeBlocks(document.lineAt(editorLine).text)}\n\`\`\``;
 			}
 		}
 
@@ -147,7 +148,7 @@ export async function localChangesMessage(
 	fromCommit: GitCommit | undefined,
 	uri: GitUri,
 	editorLine: number, // 0-based, Git is 1-based
-	hunk: GitDiffHunk,
+	hunk: ParsedGitDiffHunk,
 ): Promise<MarkdownString | undefined> {
 	const diff = getDiffFromHunk(hunk);
 
@@ -303,16 +304,16 @@ export async function detailsMessage(
 	return markdown;
 }
 
-function getDiffFromHunk(hunk: GitDiffHunk): string {
-	return `\`\`\`diff\n${hunk.contents.trim()}\n\`\`\``;
+function getDiffFromHunk(hunk: ParsedGitDiffHunk): string {
+	return `\`\`\`diff\n${escapeMarkdownCodeBlocks(hunk.content.trim())}\n\`\`\``;
 }
 
-function getDiffFromLine(lineDiff: GitDiffLine, diffStyle?: 'line' | 'hunk'): string {
+function getDiffFromLine(lineDiff: GitLineDiff, diffStyle?: 'line' | 'hunk'): string {
 	if (diffStyle === 'hunk' || (diffStyle == null && configuration.get('hovers.changesDiff') === 'hunk')) {
 		return getDiffFromHunk(lineDiff.hunk);
 	}
 
-	return `\`\`\`diff${lineDiff.line.previous == null ? '' : `\n- ${lineDiff.line.previous.trim()}`}${
-		lineDiff.line.current == null ? '' : `\n+ ${lineDiff.line.current.trim()}`
-	}\n\`\`\``;
+	return `\`\`\`diff${
+		lineDiff.line.previous == null ? '' : `\n- ${escapeMarkdownCodeBlocks(lineDiff.line.previous.trim())}`
+	}${lineDiff.line.current == null ? '' : `\n+ ${escapeMarkdownCodeBlocks(lineDiff.line.current.trim())}`}\n\`\`\``;
 }

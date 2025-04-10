@@ -35,7 +35,8 @@ import type { FlagsQuickPickItem } from '../../quickpicks/items/flags';
 import { createFlagsQuickPickItem } from '../../quickpicks/items/flags';
 import { configuration } from '../../system/-webview/configuration';
 import { isDescendant } from '../../system/-webview/path';
-import { getWorkspaceFriendlyPath, openWorkspace, revealInFileExplorer } from '../../system/-webview/vscode';
+import { revealInFileExplorer } from '../../system/-webview/vscode';
+import { getWorkspaceFriendlyPath, openWorkspace } from '../../system/-webview/vscode/workspaces';
 import { basename } from '../../system/path';
 import type { Deferred } from '../../system/promise';
 import { pluralize, truncateLeft } from '../../system/string';
@@ -1219,9 +1220,9 @@ export class WorktreeGitCommand extends QuickCommand<State> {
 			try {
 				const patchProvider = this.container.git.patch(state.worktree.uri);
 				const commit = await patchProvider?.createUnreachableCommitForPatch(
-					state.changes.contents,
 					state.changes.baseSha,
 					'Copied Changes',
+					state.changes.contents,
 				);
 				if (commit == null) return;
 

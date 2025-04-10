@@ -21,11 +21,7 @@ export interface OpenRevisionFileCommandArgs {
 @command()
 export class OpenRevisionFileCommand extends ActiveEditorCommand {
 	constructor(private readonly container: Container) {
-		super([
-			'gitlens.openRevisionFile',
-			'gitlens.openRevisionFileInDiffLeft',
-			'gitlens.openRevisionFileInDiffRight',
-		]);
+		super('gitlens.openRevisionFile');
 	}
 
 	async execute(editor?: TextEditor, uri?: Uri, args?: OpenRevisionFileCommandArgs): Promise<void> {
@@ -47,13 +43,13 @@ export class OpenRevisionFileCommand extends ActiveEditorCommand {
 					args.revisionUri =
 						commit?.file?.status === 'D'
 							? this.container.git.getRevisionUri(
+									commit.repoPath,
 									(await commit.getPreviousSha()) ?? deletedOrMissing,
 									commit.file,
-									commit.repoPath,
 							  )
-							: this.container.git.getRevisionUri(gitUri);
+							: this.container.git.getRevisionUriFromGitUri(gitUri);
 				} else {
-					args.revisionUri = this.container.git.getRevisionUri(gitUri);
+					args.revisionUri = this.container.git.getRevisionUriFromGitUri(gitUri);
 				}
 			}
 

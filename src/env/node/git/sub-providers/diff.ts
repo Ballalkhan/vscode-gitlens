@@ -11,7 +11,7 @@ import type {
 import { GitUri } from '../../../../git/gitUri';
 import type { GitDiff, GitDiffFiles, GitDiffFilter, GitDiffShortStat } from '../../../../git/models/diff';
 import type { GitFile } from '../../../../git/models/file';
-import type { GitRevisionRange } from '../../../../git/models/revision';
+import type { GitRevisionRange, GitRevisionRangeNotation } from '../../../../git/models/revision';
 import { deletedOrMissing, uncommitted, uncommittedStaged } from '../../../../git/models/revision';
 import {
 	parseGitApplyFiles,
@@ -23,10 +23,11 @@ import {
 	parseGitLogSimpleFormat,
 	parseGitLogSimpleRenamed,
 } from '../../../../git/parsers/logParser';
-import { isRevisionRange, isUncommittedStaged } from '../../../../git/utils/revision.utils';
+import { getRevisionRangeParts, isRevisionRange, isUncommittedStaged } from '../../../../git/utils/revision.utils';
 import { showGenericErrorMessage } from '../../../../messages';
 import { configuration } from '../../../../system/-webview/configuration';
 import { splitPath } from '../../../../system/-webview/path';
+import { getOpenTextDocument } from '../../../../system/-webview/vscode/documents';
 import { log } from '../../../../system/decorators/log';
 import { Logger } from '../../../../system/logger';
 import { getLogScope } from '../../../../system/logger.scope';
@@ -89,12 +90,21 @@ export class DiffGitSubProvider implements GitDiffSubProvider {
 		repoPath: string,
 		to: string,
 		from?: string,
-		options?: { context?: number; includeUntracked: boolean; uris?: Uri[] },
+		options?: { context?: number; includeUntracked?: boolean; notation?: GitRevisionRangeNotation; uris?: Uri[] },
 	): Promise<GitDiff | undefined> {
 		const scope = getLogScope();
 		const args = [`-U${options?.context ?? 3}`];
 
-		from = prepareToFromDiffArgs(to, from, args);
+		if (to != null && isRevisionRange(to)) {
+			const parts = getRevisionRangeParts(to);
+			if (parts != null) {
+				to = parts.right ?? '';
+				from = parts.left;
+				options = { ...options, notation: parts.notation };
+			}
+		}
+
+		from = prepareToFromDiffArgs(to, from, args, options?.notation);
 
 		let paths: Set<string> | undefined;
 		let untrackedPaths: string[] | undefined;
@@ -138,7 +148,7 @@ export class DiffGitSubProvider implements GitDiffSubProvider {
 			}
 		}
 
-		const diff: GitDiff = { contents: data, from: from, to: to };
+		const diff: GitDiff = { contents: data, from: from, to: to, notation: options?.notation };
 		return diff;
 	}
 
@@ -232,6 +242,15 @@ export class DiffGitSubProvider implements GitDiffSubProvider {
 						next: GitUri.fromFile(relativePath, repoPath, uncommittedStaged),
 					};
 				}
+			} else {
+				const workingUri = GitUri.fromFile(relativePath, repoPath, undefined);
+				const isDirty = getOpenTextDocument(workingUri)?.isDirty;
+				if (!isDirty) {
+					return {
+						current: (await this.getPreviousUri(repoPath, uri, ref, 0))!,
+						next: workingUri,
+					};
+				}
 			}
 
 			return {
@@ -311,10 +330,12 @@ export class DiffGitSubProvider implements GitDiffSubProvider {
 		uri: Uri,
 		ref: string | undefined,
 		skip: number = 0,
+		dirty?: boolean,
 	): Promise<PreviousComparisonUrisResult | undefined> {
 		if (ref === deletedOrMissing) return undefined;
 
 		const relativePath = this.provider.getRelativePath(uri, repoPath);
+		let skipPrev = 0;
 
 		// If we are at the working tree (i.e. no ref), we need to dig deeper to figure out where to go
 		if (!ref) {
@@ -342,7 +363,9 @@ export class DiffGitSubProvider implements GitDiffSubProvider {
 						current: GitUri.fromFile(relativePath, repoPath, uncommittedStaged),
 						previous: await this.getPreviousUri(repoPath, uri, ref, skip - 1),
 					};
-				} else if (status.workingTreeStatus != null) {
+				}
+
+				if (status.workingTreeStatus != null) {
 					if (skip === 0) {
 						return {
 							current: GitUri.fromFile(relativePath, repoPath, undefined),
@@ -350,21 +373,21 @@ export class DiffGitSubProvider implements GitDiffSubProvider {
 						};
 					}
 				}
-			} else if (skip === 0) {
-				skip++;
+			} else if (!dirty && skip === 0) {
+				skipPrev++;
 			}
-		}
-		// If we are at the index (staged), diff staged with HEAD
-		else if (isUncommittedStaged(ref)) {
+		} else if (isUncommittedStaged(ref)) {
+			// If we are at the index (staged), diff staged with HEAD
+
 			const current =
 				skip === 0
 					? GitUri.fromFile(relativePath, repoPath, ref)
-					: (await this.getPreviousUri(repoPath, uri, undefined, skip - 1))!;
+					: (await this.getPreviousUri(repoPath, uri, undefined, skip + skipPrev - 1))!;
 			if (current == null || current.sha === deletedOrMissing) return undefined;
 
 			return {
 				current: current,
-				previous: await this.getPreviousUri(repoPath, uri, undefined, skip),
+				previous: await this.getPreviousUri(repoPath, uri, undefined, skip + skipPrev),
 			};
 		}
 
@@ -372,12 +395,12 @@ export class DiffGitSubProvider implements GitDiffSubProvider {
 		const current =
 			skip === 0
 				? GitUri.fromFile(relativePath, repoPath, ref)
-				: (await this.getPreviousUri(repoPath, uri, ref, skip - 1))!;
+				: (await this.getPreviousUri(repoPath, uri, ref, skip + skipPrev - 1))!;
 		if (current == null || current.sha === deletedOrMissing) return undefined;
 
 		return {
 			current: current,
-			previous: await this.getPreviousUri(repoPath, uri, ref, skip),
+			previous: await this.getPreviousUri(repoPath, uri, ref, skip + skipPrev),
 		};
 	}
 
@@ -497,6 +520,10 @@ export class DiffGitSubProvider implements GitDiffSubProvider {
 
 		if (ref === uncommitted) {
 			ref = undefined;
+		}
+
+		if (ref === 'HEAD' && skip === 0) {
+			skip++;
 		}
 
 		const relativePath = this.provider.getRelativePath(uri, repoPath);
@@ -630,7 +657,12 @@ export class DiffGitSubProvider implements GitDiffSubProvider {
 		}
 	}
 }
-function prepareToFromDiffArgs(to: string, from: string | undefined, args: string[]) {
+function prepareToFromDiffArgs(
+	to: string,
+	from: string | undefined,
+	args: string[],
+	notation?: GitRevisionRangeNotation,
+): string {
 	if (to === uncommitted) {
 		if (from != null) {
 			args.push(from);
@@ -656,6 +688,8 @@ function prepareToFromDiffArgs(to: string, from: string | undefined, args: strin
 		}
 	} else if (to === '') {
 		args.push(from);
+	} else if (notation != null) {
+		args.push(`${from}${notation}${to}`);
 	} else {
 		args.push(from, to);
 	}
