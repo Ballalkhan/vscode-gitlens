@@ -1,18 +1,15 @@
 import type { CancellationToken, Event, LanguageModelChat, LanguageModelChatSelector } from 'vscode';
-import { CancellationTokenSource, Disposable, EventEmitter, LanguageModelChatMessage, lm } from 'vscode';
+import { Disposable, EventEmitter, LanguageModelChatMessage, lm } from 'vscode';
 import { vscodeProviderDescriptor } from '../../constants.ai';
-import type { TelemetryEvents } from '../../constants.telemetry';
 import type { Container } from '../../container';
-import { sum } from '../../system/iterable';
+import { AIError, AIErrorReason, CancellationError } from '../../errors';
 import { getLoggableName, Logger } from '../../system/logger';
 import { startLogScope } from '../../system/logger.scope';
 import { capitalize } from '../../system/string';
 import type { ServerConnection } from '../gk/serverConnection';
 import type { AIActionType, AIModel } from './models/model';
-import type { PromptTemplate, PromptTemplateContext } from './models/promptTemplates';
-import type { AIProvider, AIRequestResult } from './models/provider';
-import { getMaxCharacters, getValidatedTemperature, showDiffTruncationWarning } from './utils/-webview/ai.utils';
-import { getLocalPromptTemplate, resolvePrompt } from './utils/-webview/prompt.utils';
+import type { AIChatMessage, AIProvider, AIRequestResult } from './models/provider';
+import { getActionName, getValidatedTemperature } from './utils/-webview/ai.utils';
 
 const provider = vscodeProviderDescriptor;
 
@@ -54,13 +51,13 @@ export class VSCodeAIProvider implements AIProvider<typeof provider.id> {
 		return (await this.getModels()).length !== 0;
 	}
 
+	getApiKey(_silent: boolean): Promise<string | undefined> {
+		return Promise.resolve('<not applicable>');
+	}
+
 	async getModels(): Promise<readonly AIModel<typeof provider.id>[]> {
 		const models = await lm.selectChatModels();
 		return models.map(getModelFromChatModel);
-	}
-
-	async getPromptTemplate(action: AIActionType, model: VSCodeAIModel): Promise<PromptTemplate | undefined> {
-		return Promise.resolve(getLocalPromptTemplate(action, model));
 	}
 
 	private async getChatModel(model: VSCodeAIModel): Promise<LanguageModelChat | undefined> {
@@ -70,92 +67,91 @@ export class VSCodeAIProvider implements AIProvider<typeof provider.id> {
 
 	async sendRequest<TAction extends AIActionType>(
 		action: TAction,
-		context: PromptTemplateContext<TAction>,
 		model: VSCodeAIModel,
-		reporting: TelemetryEvents['ai/generate' | 'ai/explain'],
-		options?: { cancellation?: CancellationToken; outputTokens?: number },
+		_apiKey: string,
+		getMessages: (maxInputTokens: number, retries: number) => Promise<AIChatMessage[]>,
+		options: { cancellation: CancellationToken; modelOptions?: { outputTokens?: number; temperature?: number } },
 	): Promise<AIRequestResult | undefined> {
 		using scope = startLogScope(`${getLoggableName(this)}.sendRequest`, false);
 
 		const chatModel = await this.getChatModel(model);
 		if (chatModel == null) return undefined;
 
-		let cancellation;
-		let cancellationSource;
-		if (options?.cancellation == null) {
-			cancellationSource = new CancellationTokenSource();
-			cancellation = cancellationSource.token;
-		} else {
-			cancellation = options.cancellation;
-		}
-
-		const prompt = await this.getPromptTemplate(action, model);
-		if (prompt == null) {
-			debugger;
-			Logger.error(undefined, scope, `Unable to find prompt template for '${action}'`);
-			return undefined;
-		}
-
 		let retries = 0;
-		let maxCodeCharacters = getMaxCharacters(model, 2600) - 1000; // TODO: Use chatModel.countTokens
+		let maxInputTokens = model.maxTokens.input;
 
-		try {
-			let truncated = false;
-			while (true) {
-				let content;
-				({ content, truncated } = resolvePrompt(action, prompt, context, maxCodeCharacters));
-				const messages: LanguageModelChatMessage[] = [LanguageModelChatMessage.User(content)];
+		while (true) {
+			try {
+				const messages = (await getMessages(maxInputTokens, retries)).map(m => {
+					switch (m.role) {
+						case 'assistant':
+							return LanguageModelChatMessage.Assistant(m.content);
+						default:
+							return LanguageModelChatMessage.User(m.content);
+					}
+				});
 
-				reporting['retry.count'] = retries;
-				reporting['input.length'] = (reporting['input.length'] ?? 0) + sum(messages, m => m.content.length);
-
-				try {
-					const rsp = await chatModel.sendRequest(
-						messages,
-						{
-							justification: accessJustification,
-							modelOptions: { temperature: getValidatedTemperature(model.temperature) },
+				const rsp = await chatModel.sendRequest(
+					messages,
+					{
+						justification: accessJustification,
+						modelOptions: {
+							outputTokens: model.maxTokens.output
+								? Math.min(options.modelOptions?.outputTokens ?? Infinity, model.maxTokens.output)
+								: options.modelOptions?.outputTokens,
+							temperature: getValidatedTemperature(model.temperature),
 						},
-						cancellation,
-					);
+					},
+					options.cancellation,
+				);
 
-					if (truncated) {
-						showDiffTruncationWarning(maxCodeCharacters, model);
-					}
+				let message = '';
+				for await (const fragment of rsp.text) {
+					message += fragment;
+				}
 
-					let message = '';
-					for await (const fragment of rsp.text) {
-						message += fragment;
-					}
+				return { content: message.trim(), model: model } satisfies AIRequestResult;
+			} catch (ex) {
+				if (ex instanceof CancellationError) {
+					Logger.error(ex, scope, `Cancelled request to ${getActionName(action)}: (${model.provider.name})`);
+					throw ex;
+				}
 
-					return { content: message.trim() } satisfies AIRequestResult;
-				} catch (ex) {
-					debugger;
+				debugger;
 
-					let message = ex instanceof Error ? ex.message : String(ex);
+				let message = ex instanceof Error ? ex.message : String(ex);
 
-					if (ex instanceof Error && 'code' in ex && ex.code === 'NoPermissions') {
-						Logger.error(ex, scope, `User denied access to ${model.provider.name}`);
-						throw new Error(`User denied access to ${model.provider.name}`);
-					}
+				if (ex instanceof Error && 'code' in ex && ex.code === 'NoPermissions') {
+					Logger.error(ex, scope, `User denied access to ${model.provider.name}`);
+					throw new AIError(AIErrorReason.DeniedByUser, ex);
+				}
 
-					if (ex instanceof Error && 'cause' in ex && ex.cause instanceof Error) {
-						message += `\n${ex.cause.message}`;
+				if (ex instanceof Error && 'cause' in ex && ex.cause instanceof Error) {
+					message += `\n${ex.cause.message}`;
 
-						if (retries++ < 2 && ex.cause.message.includes('exceeds token limit')) {
-							maxCodeCharacters -= 500 * retries;
+					if (ex.cause.message.includes('exceeds token limit')) {
+						if (retries++ < 2) {
+							maxInputTokens -= 500 * retries;
 							continue;
 						}
-					}
 
-					Logger.error(ex, scope, `Unable to ${prompt.name}: (${model.provider.name})`);
-					throw new Error(
-						`Unable to ${prompt.name}: (${model.provider.name}${ex.code ? `:${ex.code}` : ''}) ${message}`,
-					);
+						Logger.error(ex, scope, `Unable to ${getActionName(action)}: (${model.provider.name})`);
+						throw new AIError(AIErrorReason.RequestTooLarge, ex);
+					}
 				}
+
+				Logger.error(ex, scope, `Unable to ${getActionName(action)}: (${model.provider.name})`);
+
+				if (message.includes('Model is not supported for this request')) {
+					throw new AIError(AIErrorReason.ModelNotSupported, ex);
+				}
+
+				throw new Error(
+					`Unable to ${getActionName(action)}: (${model.provider.name}${
+						ex.code ? `:${ex.code}` : ''
+					}) ${message}`,
+				);
 			}
-		} finally {
-			cancellationSource?.dispose();
 		}
 	}
 }
@@ -169,7 +165,7 @@ function getModelFromChatModel(model: LanguageModelChat): VSCodeAIModel {
 			vendor: model.vendor,
 			family: model.family,
 		},
-		maxTokens: { input: model.maxInputTokens, output: 4096 },
+		maxTokens: { input: model.maxInputTokens, output: undefined },
 		provider: { id: provider.id, name: capitalize(model.vendor) },
 	};
 }

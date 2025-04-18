@@ -308,7 +308,7 @@ function getWebviewsConfigs(mode, env) {
 		getWebviewConfig(
 			{
 				commitDetails: { entry: './commitDetails/commitDetails.ts' },
-				graph: { entry: './plus/graph/graph.tsx', plus: true },
+				graph: { entry: './plus/graph/graph.ts', plus: true },
 				home: { entry: './home/home.ts' },
 				rebase: { entry: './rebase/rebase.ts' },
 				settings: { entry: './settings/settings.ts' },
@@ -316,24 +316,6 @@ function getWebviewsConfigs(mode, env) {
 				patchDetails: { entry: './plus/patchDetails/patchDetails.ts', plus: true },
 			},
 			{},
-			mode,
-			env,
-		),
-		getWebviewConfig(
-			{
-				'graph-next': { entry: './plus/graph-next/graph.ts', plus: true },
-			},
-			{
-				alias: {
-					'@gitkraken/gitkraken-components': path.resolve(
-						__dirname,
-						'node_modules',
-						'@gitkraken/gitkraken-components-next',
-					),
-					react: path.resolve(__dirname, 'node_modules', 'react-next'),
-					'react-dom': path.resolve(__dirname, 'node_modules', 'react-dom-next'),
-				},
-			},
 			mode,
 			env,
 		),
@@ -382,6 +364,17 @@ function getWebviewsCommonConfig(mode, env) {
 		}),
 	];
 
+	const imageGeneratorConfig = getImageMinimizerConfig(mode, env);
+
+	if (mode !== 'production') {
+		plugins.push(
+			new ImageMinimizerPlugin({
+				deleteOriginalAssets: true,
+				generator: [imageGeneratorConfig],
+			}),
+		);
+	}
+
 	if (!env.skipLint) {
 		plugins.push(
 			new ESLintLitePlugin({
@@ -405,6 +398,17 @@ function getWebviewsCommonConfig(mode, env) {
 		output: {
 			path: path.join(__dirname, 'dist', 'webviews'),
 			publicPath: '#{root}/dist/webviews/',
+		},
+		optimization: {
+			minimizer:
+				mode === 'production'
+					? [
+							new ImageMinimizerPlugin({
+								deleteOriginalAssets: true,
+								generator: [imageGeneratorConfig],
+							}),
+					  ]
+					: [],
 		},
 		plugins: plugins,
 		infrastructureLogging:
@@ -706,13 +710,7 @@ function getImageMinimizerConfig(mode, env) {
 	return {
 		type: 'asset',
 		implementation: ImageMinimizerPlugin.sharpGenerate,
-		options: {
-			encodeOptions: {
-				webp: {
-					lossless: true,
-				},
-			},
-		},
+		options: { encodeOptions: { webp: { lossless: true } } },
 	};
 }
 

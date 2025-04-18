@@ -17,6 +17,7 @@ import { SubscriptionPlanId } from '../constants.subscription';
 import type { Container } from '../container';
 import { AccessDeniedError, ProviderNotFoundError, ProviderNotSupportedError } from '../errors';
 import type { FeatureAccess, Features, PlusFeatures, RepoFeatureAccess } from '../features';
+import { isAdvancedFeature, isProFeatureOnAllRepos } from '../features';
 import type { Subscription } from '../plus/gk/models/subscription';
 import type { SubscriptionChangeEvent } from '../plus/gk/subscriptionService';
 import { isSubscriptionPaidPlan } from '../plus/gk/utils/subscription.utils';
@@ -69,7 +70,7 @@ import { createSubProviderProxyForRepo } from './gitProvider';
 import type { GitUri } from './gitUri';
 import type { GitBlame, GitBlameLine } from './models/blame';
 import type { GitBranch } from './models/branch';
-import type { GitDiffFile, GitDiffLine } from './models/diff';
+import type { GitLineDiff, ParsedGitDiffHunks } from './models/diff';
 import type { GitFile } from './models/file';
 import type { GitBranchReference, GitReference } from './models/reference';
 import type { GitRemote } from './models/remote';
@@ -77,6 +78,7 @@ import type { Repository, RepositoryChangeEvent } from './models/repository';
 import { RepositoryChange, RepositoryChangeComparisonMode } from './models/repository';
 import { deletedOrMissing } from './models/revision';
 import type { GitTag } from './models/tag';
+import type { LocalInfoFromRemoteUriResult } from './remotes/remoteProvider';
 import { sortRepositories } from './utils/-webview/sorting';
 import { calculateDistribution } from './utils/contributor.utils';
 import { getRemoteThemeIconString, getVisibilityCacheKey } from './utils/remote.utils';
@@ -775,15 +777,7 @@ export class GitProviderService implements Disposable {
 			return { allowed: subscription.account?.verified !== false, subscription: { current: subscription } };
 		}
 
-		if (
-			feature === 'launchpad' ||
-			feature === 'startWork' ||
-			feature === 'associateIssueWithBranch' ||
-			feature === 'generateStashMessage' ||
-			feature === 'explainCommit' ||
-			feature === 'cloudPatchGenerateTitleAndDescription' ||
-			feature === 'generateChangelog'
-		) {
+		if (feature != null && (isProFeatureOnAllRepos(feature) || isAdvancedFeature(feature))) {
 			return { allowed: false, subscription: { current: subscription, required: SubscriptionPlanId.Pro } };
 		}
 
@@ -1275,12 +1269,12 @@ export class GitProviderService implements Disposable {
 	async getBestRevisionUri(
 		repoPath: string | Uri | undefined,
 		path: string,
-		ref: string | undefined,
+		rev: string | undefined,
 	): Promise<Uri | undefined> {
-		if (repoPath == null || ref === deletedOrMissing) return undefined;
+		if (repoPath == null || rev === deletedOrMissing) return undefined;
 
 		const { provider, path: rp } = this.getProvider(repoPath);
-		return provider.getBestRevisionUri(rp, provider.getRelativePath(path, rp), ref);
+		return provider.getBestRevisionUri(rp, provider.getRelativePath(path, rp), rev);
 	}
 
 	getRelativePath(pathOrUri: string | Uri, base: string | Uri): string {
@@ -1288,31 +1282,20 @@ export class GitProviderService implements Disposable {
 		return provider.getRelativePath(pathOrUri, base);
 	}
 
-	getRevisionUri(uri: GitUri): Uri;
-	getRevisionUri(ref: string, path: string, repoPath: string | Uri): Uri;
-	getRevisionUri(ref: string, file: GitFile, repoPath: string | Uri): Uri;
 	@log()
-	getRevisionUri(refOrUri: string | GitUri, pathOrFile?: string | GitFile, repoPath?: string | Uri): Uri {
-		let path: string;
-		let ref: string | undefined;
+	getRevisionUri(repoPath: string | Uri, rev: string, pathOrFile: string | GitFile): Uri {
+		const path = typeof pathOrFile === 'string' ? pathOrFile : pathOrFile?.originalPath ?? pathOrFile?.path ?? '';
 
-		if (typeof refOrUri === 'string') {
-			ref = refOrUri;
+		const { provider, path: rp } = this.getProvider(repoPath);
+		return provider.getRevisionUri(rp, rev, provider.getRelativePath(path, rp));
+	}
 
-			if (typeof pathOrFile === 'string') {
-				path = pathOrFile;
-			} else {
-				path = pathOrFile?.originalPath ?? pathOrFile?.path ?? '';
-			}
-		} else {
-			ref = refOrUri.sha;
-			repoPath = refOrUri.repoPath!;
+	@log()
+	getRevisionUriFromGitUri(uri: GitUri): Uri {
+		const path = getBestPath(uri);
 
-			path = getBestPath(refOrUri);
-		}
-
-		const { provider, path: rp } = this.getProvider(repoPath!);
-		return provider.getRevisionUri(rp, provider.getRelativePath(path, rp), ref!);
+		const { provider, path: rp } = this.getProvider(uri.repoPath!);
+		return provider.getRevisionUri(rp, uri.sha!, provider.getRelativePath(path, rp));
 	}
 
 	@log()
@@ -1698,7 +1681,7 @@ export class GitProviderService implements Disposable {
 	 * @param ref1 Commit to diff from
 	 * @param ref2 Commit to diff to
 	 */
-	getDiffForFile(uri: GitUri, ref1: string | undefined, ref2?: string): Promise<GitDiffFile | undefined> {
+	getDiffForFile(uri: GitUri, ref1: string | undefined, ref2?: string): Promise<ParsedGitDiffHunks | undefined> {
 		const { provider } = this.getProvider(uri);
 		return provider.getDiffForFile(uri, ref1, ref2);
 	}
@@ -1710,7 +1693,7 @@ export class GitProviderService implements Disposable {
 	 * @param ref Commit to diff from
 	 * @param contents Contents to use for the diff
 	 */
-	getDiffForFileContents(uri: GitUri, ref: string, contents: string): Promise<GitDiffFile | undefined> {
+	getDiffForFileContents(uri: GitUri, ref: string, contents: string): Promise<ParsedGitDiffHunks | undefined> {
 		const { provider } = this.getProvider(uri);
 		return provider.getDiffForFileContents(uri, ref, contents);
 	}
@@ -1728,7 +1711,7 @@ export class GitProviderService implements Disposable {
 		editorLine: number,
 		ref1: string | undefined,
 		ref2?: string,
-	): Promise<GitDiffLine | undefined> {
+	): Promise<GitLineDiff | undefined> {
 		const { provider } = this.getProvider(uri);
 		return provider.getDiffForLine(uri, editorLine, ref1, ref2);
 	}
@@ -1958,13 +1941,10 @@ export class GitProviderService implements Disposable {
 		return this._repositories.getClosest(pathOrUri);
 	}
 
-	async getLocalInfoFromRemoteUri(
-		uri: Uri,
-		options?: { validate?: boolean },
-	): Promise<{ uri: Uri; startLine?: number; endLine?: number } | undefined> {
+	async getLocalInfoFromRemoteUri(uri: Uri): Promise<LocalInfoFromRemoteUriResult | undefined> {
 		for (const repo of this.openRepositories) {
 			for (const remote of await repo.git.remotes().getRemotes()) {
-				const local = await remote?.provider?.getLocalInfoFromRemoteUri(repo, uri, options);
+				const local = await remote?.provider?.getLocalInfoFromRemoteUri(repo, uri);
 				if (local != null) return local;
 			}
 		}

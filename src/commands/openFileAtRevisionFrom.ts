@@ -53,7 +53,7 @@ export class OpenFileAtRevisionFromCommand extends ActiveEditorCommand {
 					`${title}${gitUri.getFormattedFileName({ truncateTo: quickPickTitleMaxChars - title.length })}`,
 					'Choose a stash to compare with',
 					// Stashes should always come with files, so this should be fine (but protect it just in case)
-					{ filter: c => c.files?.some(f => f.path === path || f.originalPath === path) ?? true },
+					{ filter: c => c.fileset?.files.some(f => f.path === path || f.originalPath === path) ?? true },
 				);
 				if (pick == null) return;
 
@@ -70,7 +70,7 @@ export class OpenFileAtRevisionFromCommand extends ActiveEditorCommand {
 							keys: ['right', 'alt+right', 'ctrl+right'],
 							onDidPressKey: async (_key, item) => {
 								await openFileAtRevision(
-									this.container.git.getRevisionUri(item.ref, gitUri.fsPath, gitUri.repoPath!),
+									this.container.git.getRevisionUri(gitUri.repoPath!, item.ref, gitUri.fsPath),
 									{
 										annotationType: args.annotationType,
 										line: args.line,
@@ -89,7 +89,7 @@ export class OpenFileAtRevisionFromCommand extends ActiveEditorCommand {
 		}
 
 		await openFileAtRevision(
-			this.container.git.getRevisionUri(args.reference.ref, gitUri.fsPath, gitUri.repoPath),
+			this.container.git.getRevisionUri(gitUri.repoPath, args.reference.ref, gitUri.fsPath),
 			{
 				annotationType: args.annotationType,
 				line: args.line,

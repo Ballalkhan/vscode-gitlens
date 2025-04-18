@@ -115,16 +115,28 @@
 ```typescript
 {
   'changeType': 'wip' | 'stash' | 'commit' | 'draft-stash' | 'draft-patch' | 'draft-suggested_pr_change',
+  'config.largePromptThreshold': number,
+  'config.usedCustomInstructions': boolean,
   'duration': number,
+  'failed.cancelled.reason': 'large-prompt',
   'failed.error': string,
+  'failed.error.detail': string,
   'failed.reason': 'user-declined' | 'user-cancelled' | 'error',
   'input.length': number,
   'model.id': string,
-  'model.provider.id': 'anthropic' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'openai' | 'vscode' | 'xai',
+  'model.provider.id': 'anthropic' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'openai' | 'openrouter' | 'vscode' | 'xai',
   'model.provider.name': string,
   'output.length': number,
   'retry.count': number,
-  'type': 'change'
+  'type': 'change',
+  'usage.completionTokens': number,
+  'usage.limits.limit': number,
+  'usage.limits.resetsOn': string,
+  'usage.limits.used': number,
+  'usage.promptTokens': number,
+  'usage.totalTokens': number,
+  'warning.exceededLargePromptThreshold': boolean,
+  'warning.promptTruncated': boolean
 }
 ```
 
@@ -134,16 +146,28 @@
 
 ```typescript
 {
+  'config.largePromptThreshold': number,
+  'config.usedCustomInstructions': boolean,
   'duration': number,
+  'failed.cancelled.reason': 'large-prompt',
   'failed.error': string,
+  'failed.error.detail': string,
   'failed.reason': 'user-declined' | 'user-cancelled' | 'error',
   'input.length': number,
   'model.id': string,
-  'model.provider.id': 'anthropic' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'openai' | 'vscode' | 'xai',
+  'model.provider.id': 'anthropic' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'openai' | 'openrouter' | 'vscode' | 'xai',
   'model.provider.name': string,
   'output.length': number,
   'retry.count': number,
-  'type': 'commitMessage'
+  'type': 'commitMessage',
+  'usage.completionTokens': number,
+  'usage.limits.limit': number,
+  'usage.limits.resetsOn': string,
+  'usage.limits.used': number,
+  'usage.promptTokens': number,
+  'usage.totalTokens': number,
+  'warning.exceededLargePromptThreshold': boolean,
+  'warning.promptTruncated': boolean
 }
 ```
 
@@ -151,17 +175,29 @@ or
 
 ```typescript
 {
+  'config.largePromptThreshold': number,
+  'config.usedCustomInstructions': boolean,
   'draftType': 'stash' | 'patch' | 'suggested_pr_change',
   'duration': number,
+  'failed.cancelled.reason': 'large-prompt',
   'failed.error': string,
+  'failed.error.detail': string,
   'failed.reason': 'user-declined' | 'user-cancelled' | 'error',
   'input.length': number,
   'model.id': string,
-  'model.provider.id': 'anthropic' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'openai' | 'vscode' | 'xai',
+  'model.provider.id': 'anthropic' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'openai' | 'openrouter' | 'vscode' | 'xai',
   'model.provider.name': string,
   'output.length': number,
   'retry.count': number,
-  'type': 'draftMessage'
+  'type': 'draftMessage',
+  'usage.completionTokens': number,
+  'usage.limits.limit': number,
+  'usage.limits.resetsOn': string,
+  'usage.limits.used': number,
+  'usage.promptTokens': number,
+  'usage.totalTokens': number,
+  'warning.exceededLargePromptThreshold': boolean,
+  'warning.promptTruncated': boolean
 }
 ```
 
@@ -169,16 +205,28 @@ or
 
 ```typescript
 {
+  'config.largePromptThreshold': number,
+  'config.usedCustomInstructions': boolean,
   'duration': number,
+  'failed.cancelled.reason': 'large-prompt',
   'failed.error': string,
+  'failed.error.detail': string,
   'failed.reason': 'user-declined' | 'user-cancelled' | 'error',
   'input.length': number,
   'model.id': string,
-  'model.provider.id': 'anthropic' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'openai' | 'vscode' | 'xai',
+  'model.provider.id': 'anthropic' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'openai' | 'openrouter' | 'vscode' | 'xai',
   'model.provider.name': string,
   'output.length': number,
   'retry.count': number,
-  'type': 'stashMessage'
+  'type': 'stashMessage',
+  'usage.completionTokens': number,
+  'usage.limits.limit': number,
+  'usage.limits.resetsOn': string,
+  'usage.limits.used': number,
+  'usage.promptTokens': number,
+  'usage.totalTokens': number,
+  'warning.exceededLargePromptThreshold': boolean,
+  'warning.promptTruncated': boolean
 }
 ```
 
@@ -186,16 +234,57 @@ or
 
 ```typescript
 {
+  'config.largePromptThreshold': number,
+  'config.usedCustomInstructions': boolean,
   'duration': number,
+  'failed.cancelled.reason': 'large-prompt',
   'failed.error': string,
+  'failed.error.detail': string,
   'failed.reason': 'user-declined' | 'user-cancelled' | 'error',
   'input.length': number,
   'model.id': string,
-  'model.provider.id': 'anthropic' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'openai' | 'vscode' | 'xai',
+  'model.provider.id': 'anthropic' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'openai' | 'openrouter' | 'vscode' | 'xai',
   'model.provider.name': string,
   'output.length': number,
   'retry.count': number,
-  'type': 'changelog'
+  'type': 'createPullRequest',
+  'usage.completionTokens': number,
+  'usage.limits.limit': number,
+  'usage.limits.resetsOn': string,
+  'usage.limits.used': number,
+  'usage.promptTokens': number,
+  'usage.totalTokens': number,
+  'warning.exceededLargePromptThreshold': boolean,
+  'warning.promptTruncated': boolean
+}
+```
+
+or
+
+```typescript
+{
+  'config.largePromptThreshold': number,
+  'config.usedCustomInstructions': boolean,
+  'duration': number,
+  'failed.cancelled.reason': 'large-prompt',
+  'failed.error': string,
+  'failed.error.detail': string,
+  'failed.reason': 'user-declined' | 'user-cancelled' | 'error',
+  'input.length': number,
+  'model.id': string,
+  'model.provider.id': 'anthropic' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'openai' | 'openrouter' | 'vscode' | 'xai',
+  'model.provider.name': string,
+  'output.length': number,
+  'retry.count': number,
+  'type': 'changelog',
+  'usage.completionTokens': number,
+  'usage.limits.limit': number,
+  'usage.limits.resetsOn': string,
+  'usage.limits.used': number,
+  'usage.promptTokens': number,
+  'usage.totalTokens': number,
+  'warning.exceededLargePromptThreshold': boolean,
+  'warning.promptTruncated': boolean
 }
 ```
 
@@ -206,7 +295,7 @@ or
 ```typescript
 {
   'model.id': string,
-  'model.provider.id': 'anthropic' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'openai' | 'vscode' | 'xai',
+  'model.provider.id': 'anthropic' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'openai' | 'openrouter' | 'vscode' | 'xai',
   'model.provider.name': string
 }
 ```
@@ -1484,7 +1573,7 @@ void
   'repoPrivacy': 'private' | 'public' | 'local',
   'repository.visibility': 'private' | 'public' | 'local',
   // Provided for compatibility with other GK surfaces
-  'source': 'account' | 'subscription' | 'graph' | 'patchDetails' | 'settings' | 'timeline' | 'home' | 'view' | 'code-suggest' | 'ai' | 'ai:picker' | 'associateIssueWithBranch' | 'cloud-patches' | 'commandPalette' | 'deeplink' | 'inspect' | 'inspect-overview' | 'integrations' | 'launchpad' | 'launchpad-indicator' | 'launchpad-view' | 'notification' | 'prompt' | 'quick-wizard' | 'remoteProvider' | 'startWork' | 'trial-indicator' | 'scm-input' | 'walkthrough' | 'whatsnew' | 'worktrees'
+  'source': 'account' | 'subscription' | 'graph' | 'patchDetails' | 'settings' | 'timeline' | 'home' | 'view' | 'code-suggest' | 'ai' | 'ai:picker' | 'associateIssueWithBranch' | 'cloud-patches' | 'commandPalette' | 'deeplink' | 'feature-badge' | 'feature-gate' | 'inspect' | 'inspect-overview' | 'integrations' | 'launchpad' | 'launchpad-indicator' | 'launchpad-view' | 'merge-target' | 'notification' | 'prompt' | 'quick-wizard' | 'remoteProvider' | 'startWork' | 'trial-indicator' | 'scm-input' | 'walkthrough' | 'whatsnew' | 'worktrees'
 }
 ```
 
@@ -1805,7 +1894,7 @@ void
 
 ```typescript
 {
-  'action': 'manage' | 'sign-up' | 'sign-in' | 'sign-out' | 'reactivate' | 'resend-verification' | 'pricing' | 'start-preview-trial'
+  'action': 'manage' | 'sign-up' | 'sign-in' | 'sign-out' | 'manage-subscription' | 'reactivate' | 'refer-friend' | 'resend-verification' | 'pricing' | 'start-preview-trial'
 }
 ```
 
@@ -2023,7 +2112,7 @@ or
 ```typescript
 {
   'command': string,
-  'name': 'open/help-center/start-integrations' | 'open/help-center/accelerate-pr-reviews' | 'open/help-center/streamline-collaboration' | 'open/help-center/interactive-code-history' | 'open/help-center/community-vs-pro' | 'open/devex-platform' | 'open/drafts' | 'connect/integrations' | 'open/autolinks' | 'open/graph' | 'open/launchpad' | 'create/worktree' | 'open/help-center' | 'plus/sign-up' | 'plus/upgrade' | 'plus/reactivate' | 'open/walkthrough' | 'open/inspect',
+  'name': 'open/help-center/start-integrations' | 'open/help-center/accelerate-pr-reviews' | 'open/help-center/streamline-collaboration' | 'open/help-center/interactive-code-history' | 'open/help-center/community-vs-pro' | 'open/help-center/home-view' | 'open/devex-platform' | 'open/drafts' | 'open/home' | 'connect/integrations' | 'open/autolinks' | 'open/graph' | 'open/launchpad' | 'create/worktree' | 'open/help-center' | 'plus/sign-up' | 'plus/upgrade' | 'plus/reactivate' | 'open/walkthrough' | 'open/inspect',
   'type': 'command'
 }
 ```
@@ -2032,7 +2121,7 @@ or
 
 ```typescript
 {
-  'name': 'open/help-center/start-integrations' | 'open/help-center/accelerate-pr-reviews' | 'open/help-center/streamline-collaboration' | 'open/help-center/interactive-code-history' | 'open/help-center/community-vs-pro' | 'open/devex-platform' | 'open/drafts' | 'connect/integrations' | 'open/autolinks' | 'open/graph' | 'open/launchpad' | 'create/worktree' | 'open/help-center' | 'plus/sign-up' | 'plus/upgrade' | 'plus/reactivate' | 'open/walkthrough' | 'open/inspect',
+  'name': 'open/help-center/start-integrations' | 'open/help-center/accelerate-pr-reviews' | 'open/help-center/streamline-collaboration' | 'open/help-center/interactive-code-history' | 'open/help-center/community-vs-pro' | 'open/help-center/home-view' | 'open/devex-platform' | 'open/drafts' | 'open/home' | 'connect/integrations' | 'open/autolinks' | 'open/graph' | 'open/launchpad' | 'create/worktree' | 'open/help-center' | 'plus/sign-up' | 'plus/upgrade' | 'plus/reactivate' | 'open/walkthrough' | 'open/inspect',
   'type': 'url',
   'url': string
 }
@@ -2042,7 +2131,7 @@ or
 
 ```typescript
 {
-  'context.key': 'integrations' | 'gettingStarted' | 'visualizeCodeHistory' | 'prReviews' | 'streamlineCollaboration'
+  'context.key': 'integrations' | 'homeView' | 'gettingStarted' | 'visualizeCodeHistory' | 'prReviews' | 'streamlineCollaboration'
 }
 ```
 

@@ -24,7 +24,10 @@ import { executeCommand, registerCommands } from './system/-webview/command';
 import { configuration, Configuration } from './system/-webview/configuration';
 import { setContext } from './system/-webview/context';
 import { Storage } from './system/-webview/storage';
-import { deviceCohortGroup, isTextDocument, isTextEditor, isWorkspaceFolder } from './system/-webview/vscode';
+import { deviceCohortGroup } from './system/-webview/vscode';
+import { isTextDocument } from './system/-webview/vscode/documents';
+import { isTextEditor } from './system/-webview/vscode/editors';
+import { isWorkspaceFolder } from './system/-webview/vscode/workspaces';
 import { setDefaultDateLocales } from './system/date';
 import { once } from './system/event';
 import { BufferedLogChannel, getLoggableName, Logger } from './system/logger';
@@ -309,6 +312,8 @@ function registerBuiltInActionRunners(container: Container): void {
 						  : ctx.branch.name,
 					remote: ctx.remote?.name ?? '',
 					repoPath: ctx.repoPath,
+					describeWithAI: ctx.describeWithAI,
+					source: ctx.source,
 				}));
 			},
 		}),

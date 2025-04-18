@@ -133,6 +133,7 @@ export class ProvidersApi {
 			[HostingIntegrationId.GitLab]: {
 				...providersMetadata[HostingIntegrationId.GitLab],
 				provider: providerApis.gitlab,
+				getRepoFn: providerApis.gitlab.getRepo.bind(providerApis.gitlab),
 				getCurrentUserFn: providerApis.gitlab.getCurrentUser.bind(providerApis.gitlab) as GetCurrentUserFn,
 				getPullRequestsForReposFn: providerApis.gitlab.getPullRequestsForRepos.bind(
 					providerApis.gitlab,
@@ -220,6 +221,7 @@ export class ProvidersApi {
 			[SelfHostedIntegrationId.BitbucketServer]: {
 				...providersMetadata[SelfHostedIntegrationId.BitbucketServer],
 				provider: providerApis.bitbucketServer,
+				getRepoFn: providerApis.bitbucketServer.getRepo.bind(providerApis.bitbucketServer),
 				getCurrentUserFn: providerApis.bitbucketServer.getCurrentUser.bind(
 					providerApis.bitbucketServer,
 				) as GetCurrentUserFn,
@@ -238,6 +240,7 @@ export class ProvidersApi {
 			[HostingIntegrationId.AzureDevOps]: {
 				...providersMetadata[HostingIntegrationId.AzureDevOps],
 				provider: providerApis.azureDevOps,
+				getRepoOfProjectFn: providerApis.azureDevOps.getRepo.bind(providerApis.azureDevOps),
 				getCurrentUserFn: providerApis.azureDevOps.getCurrentUser.bind(
 					providerApis.azureDevOps,
 				) as GetCurrentUserFn,
@@ -462,6 +465,48 @@ export class ProvidersApi {
 			};
 		} catch (e) {
 			return this.handleProviderError<PagedResult<T>>(provider.id, token, e);
+		}
+	}
+
+	async getRepo(
+		providerId: IntegrationId,
+		owner: string,
+		name: string,
+		project?: string,
+		options?: { accessToken?: string; isPAT?: boolean; baseUrl?: string },
+	): Promise<ProviderRepository | undefined> {
+		if (providerId === HostingIntegrationId.AzureDevOps && project != null) {
+			const { provider, token } = await this.ensureProviderTokenAndFunction(
+				providerId,
+				'getRepoOfProjectFn',
+				options?.accessToken,
+			);
+
+			try {
+				const result = await provider['getRepoOfProjectFn']?.(
+					{ namespace: owner, name: name, project: project },
+					{ token: token, isPAT: options?.isPAT, baseUrl: options?.baseUrl },
+				);
+				return result?.data;
+			} catch (e) {
+				return this.handleProviderError<ProviderRepository>(providerId, token, e);
+			}
+		} else {
+			const { provider, token } = await this.ensureProviderTokenAndFunction(
+				providerId,
+				'getRepoFn',
+				options?.accessToken,
+			);
+
+			try {
+				const result = await provider['getRepoFn']?.(
+					{ namespace: owner, name: name, project: project },
+					{ token: token, isPAT: options?.isPAT, baseUrl: options?.baseUrl },
+				);
+				return result?.data;
+			} catch (e) {
+				return this.handleProviderError<ProviderRepository>(providerId, token, e);
+			}
 		}
 	}
 

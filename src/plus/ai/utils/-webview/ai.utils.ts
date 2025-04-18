@@ -4,8 +4,9 @@ import type { AIProviders } from '../../../../constants.ai';
 import type { Container } from '../../../../container';
 import { createDirectiveQuickPickItem, Directive } from '../../../../quickpicks/items/directive';
 import { configuration } from '../../../../system/-webview/configuration';
+import { openSettingsEditor } from '../../../../system/-webview/vscode/editors';
 import { formatNumeric } from '../../../../system/date';
-import { getPossessiveForm } from '../../../../system/string';
+import { getPossessiveForm, pluralize } from '../../../../system/string';
 import { ensureAccountQuickPick } from '../../../gk/utils/-webview/acount.utils';
 import type { AIActionType, AIModel } from '../../models/model';
 
@@ -28,11 +29,13 @@ export function getActionName(action: AIActionType): string {
 		case 'generate-stashMessage':
 			return 'Generate Stash Message';
 		case 'generate-changelog':
-			return 'Generate Changelog';
+			return 'Generate Changelog (Preview)';
 		case 'generate-create-cloudPatch':
 			return 'Create Cloud Patch Details';
 		case 'generate-create-codeSuggestion':
 			return 'Create Code Suggestion Details';
+		case 'generate-create-pullRequest':
+			return 'Create Pull Request Details (Preview)';
 		case 'explain-changes':
 			return 'Explain Changes';
 		default:
@@ -40,11 +43,7 @@ export function getActionName(action: AIActionType): string {
 	}
 }
 
-export function getMaxCharacters(model: AIModel, outputLength: number, overrideInputTokens?: number): number {
-	const charactersPerToken = 3.1;
-	const max = (overrideInputTokens ?? model.maxTokens.input) * charactersPerToken - outputLength / charactersPerToken;
-	return Math.floor(max - max * 0.1);
-}
+export const estimatedCharactersPerToken = 3.1;
 
 export async function getOrPromptApiKey(
 	container: Container,
@@ -131,18 +130,31 @@ export function getValidatedTemperature(modelTemperature?: number | null): numbe
 	return Math.max(0, Math.min(configuration.get('ai.modelOptions.temperature'), 2));
 }
 
-export function showDiffTruncationWarning(maxCodeCharacters: number, model: AIModel): void {
-	void window.showWarningMessage(
-		`The diff of the changes had to be truncated to ${formatNumeric(
-			maxCodeCharacters,
-		)} characters to fit within the ${getPossessiveForm(model.provider.name)} limits.`,
+export async function showLargePromptWarning(estimatedTokens: number, threshold: number): Promise<boolean> {
+	const confirm = { title: 'Continue' };
+	const changeThreshold = { title: `Change Threshold` };
+	const cancel = { title: 'Cancel', isCloseAffordance: true };
+	const result = await window.showWarningMessage(
+		`This request will use approximately ${pluralize(
+			'token',
+			estimatedTokens,
+		)}, which exceeds the configured ${formatNumeric(
+			threshold,
+		)} token threshold for large prompts.\n\nDo you want to continue?`,
+		{ modal: true },
+		confirm,
+		changeThreshold,
+		cancel,
 	);
+
+	if (result === changeThreshold) {
+		void openSettingsEditor({ query: 'gitlens.ai.largePromptWarningThreshold' });
+	}
+	return result === confirm;
 }
 
-export function showPromptTruncationWarning(maxCodeCharacters: number, model: AIModel): void {
+export function showPromptTruncationWarning(model: AIModel): void {
 	void window.showWarningMessage(
-		`The prompt had to be truncated to ${formatNumeric(
-			maxCodeCharacters,
-		)} characters to fit within the ${getPossessiveForm(model.provider.name)} limits.`,
+		`The prompt was truncated to fit within the ${getPossessiveForm(model.provider.name)} limits.`,
 	);
 }

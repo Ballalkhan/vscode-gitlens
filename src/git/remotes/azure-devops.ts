@@ -1,9 +1,16 @@
 import type { Range, Uri } from 'vscode';
 import type { AutolinkReference, DynamicAutolinkReference } from '../../autolinks/models/autolinks';
+import type { Source } from '../../constants.telemetry';
+import type { Container } from '../../container';
+import { HostingIntegration } from '../../plus/integrations/integration';
+import { remoteProviderIdToIntegrationId } from '../../plus/integrations/integrationService';
+import { parseAzureHttpsUrl } from '../../plus/integrations/providers/azure/models';
 import type { Brand, Unbrand } from '../../system/brand';
+import type { CreatePullRequestRemoteResource } from '../models/remoteResource';
 import type { Repository } from '../models/repository';
 import type { GkProviderId } from '../models/repositoryIdentities';
-import type { RemoteProviderId } from './remoteProvider';
+import type { GitRevisionRangeNotation } from '../models/revision';
+import type { LocalInfoFromRemoteUriResult, RemoteProviderId } from './remoteProvider';
 import { RemoteProvider } from './remoteProvider';
 
 const gitRegex = /\/_git\/?/i;
@@ -17,7 +24,14 @@ const rangeRegex = /line=(\d+)(?:&lineEnd=(\d+))?/;
 
 export class AzureDevOpsRemote extends RemoteProvider {
 	private readonly project: string | undefined;
-	constructor(domain: string, path: string, protocol?: string, name?: string, legacy: boolean = false) {
+	constructor(
+		private readonly container: Container,
+		domain: string,
+		path: string,
+		protocol?: string,
+		name?: string,
+		legacy: boolean = false,
+	) {
 		let repoProject;
 		if (sshDomainRegex.test(domain)) {
 			path = path.replace(sshPathRegex, '');
@@ -136,13 +150,9 @@ export class AzureDevOpsRemote extends RemoteProvider {
 		return this._displayPath;
 	}
 
-	async getLocalInfoFromRemoteUri(
-		repository: Repository,
-		uri: Uri,
-		options?: { validate?: boolean },
-	): Promise<{ uri: Uri; startLine?: number; endLine?: number } | undefined> {
-		if (uri.authority !== this.domain) return Promise.resolve(undefined);
-		// if ((options?.validate ?? true) && !uri.path.startsWith(`/${this.path}/`)) return undefined;
+	async getLocalInfoFromRemoteUri(repo: Repository, uri: Uri): Promise<LocalInfoFromRemoteUriResult | undefined> {
+		if (uri.authority !== this.domain) return undefined;
+		// if (!uri.path.startsWith(`/${this.path}/`)) return undefined;
 
 		let startLine;
 		let endLine;
@@ -160,14 +170,14 @@ export class AzureDevOpsRemote extends RemoteProvider {
 		}
 
 		const match = fileRegex.exec(uri.query);
-		if (match == null) return Promise.resolve(undefined);
+		if (match == null) return undefined;
 
 		const [, path] = match;
 
-		const absoluteUri = repository.toAbsoluteUri(path, { validate: options?.validate });
-		return Promise.resolve(
-			absoluteUri != null ? { uri: absoluteUri, startLine: startLine, endLine: endLine } : undefined,
-		);
+		const absoluteUri = await repo.getAbsoluteOrBestRevisionUri(path, undefined);
+		return absoluteUri != null
+			? { uri: absoluteUri, repoPath: repo.path, rev: undefined, startLine: startLine, endLine: endLine }
+			: undefined;
 	}
 
 	protected getUrlForBranches(): string {
@@ -182,8 +192,43 @@ export class AzureDevOpsRemote extends RemoteProvider {
 		return this.encodeUrl(`${this.baseUrl}/commit/${sha}`);
 	}
 
-	protected override getUrlForComparison(base: string, compare: string, _notation: '..' | '...'): string {
-		return this.encodeUrl(`${this.baseUrl}/branchCompare?baseVersion=GB${base}&targetVersion=GB${compare}`);
+	protected override getUrlForComparison(base: string, head: string, _notation: GitRevisionRangeNotation): string {
+		return this.encodeUrl(`${this.baseUrl}/branchCompare?baseVersion=GB${base}&targetVersion=GB${head}`);
+	}
+
+	override async isReadyForForCrossForkPullRequestUrls(): Promise<boolean> {
+		const integrationId = remoteProviderIdToIntegrationId(this.id);
+		const integration = integrationId && (await this.container.integrations.get(integrationId));
+		return integration?.maybeConnected ?? integration?.isConnected() ?? false;
+	}
+
+	protected override async getUrlForCreatePullRequest(
+		{ base, head }: CreatePullRequestRemoteResource,
+		_source?: Source,
+	): Promise<string | undefined> {
+		const query = new URLSearchParams({ sourceRef: head.branch, targetRef: base.branch ?? '' });
+
+		if (base.remote.url !== head.remote.url) {
+			const parsedBaseUrl = parseAzureUrl(base.remote.url);
+			if (parsedBaseUrl == null) return undefined;
+
+			const { org: baseOrg, project: baseProject, repo: baseName } = parsedBaseUrl;
+			const targetDesc = { project: baseProject, name: baseName, owner: baseOrg };
+
+			const integrationId = remoteProviderIdToIntegrationId(this.id);
+			const integration = integrationId && (await this.container.integrations.get(integrationId));
+
+			let targetRepoId;
+			if (integration?.isConnected && integration instanceof HostingIntegration) {
+				targetRepoId = (await integration.getRepoInfo?.(targetDesc))?.id;
+			}
+			if (!targetRepoId) return undefined;
+
+			query.set('targetRepositoryId', targetRepoId);
+			// query.set('sourceRepositoryId', compare.repoId); // ?? looks like not needed
+		}
+
+		return `${this.encodeUrl(`${this.getRepoBaseUrl(head.remote.path)}/pullrequestcreate`)}?${query.toString()}`;
 	}
 
 	protected getUrlForFile(fileName: string, branch?: string, sha?: string, range?: Range): string {
@@ -206,4 +251,23 @@ export class AzureDevOpsRemote extends RemoteProvider {
 		if (branch) return this.encodeUrl(`${this.baseUrl}/?path=/${fileName}&version=GB${branch}&_a=contents${line}`);
 		return this.encodeUrl(`${this.baseUrl}?path=/${fileName}${line}`);
 	}
+}
+
+const azureSshUrlRegex = /^(?:[^@]+@)?([^:]+):v\d\//;
+function parseAzureUrl(url: string): { org: string; project: string; repo: string } | undefined {
+	if (azureSshUrlRegex.test(url)) {
+		// Examples of SSH urls:
+		// - old one: bbbchiv@vs-ssh.visualstudio.com:v3/bbbchiv/MyFirstProject/test
+		// - modern one: git@ssh.dev.azure.com:v3/bbbchiv2/MyFirstProject/test
+		url = url.replace(azureSshUrlRegex, '');
+		const match = orgAndProjectRegex.exec(url);
+		if (match != null) {
+			const [, org, project, rest] = match;
+			return { org: org, project: project, repo: rest };
+		}
+	} else {
+		const [org, project, rest] = parseAzureHttpsUrl(url);
+		return { org: org, project: project, repo: rest };
+	}
+	return undefined;
 }

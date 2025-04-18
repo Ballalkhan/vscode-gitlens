@@ -11,7 +11,7 @@ import { gate } from '../../system/decorators/-webview/gate';
 import { memoize } from '../../system/decorators/-webview/memoize';
 import { debug } from '../../system/decorators/log';
 import { weakEvent } from '../../system/event';
-import { filterMap, flatMap, map, uniqueBy } from '../../system/iterable';
+import { filterMap, flatMap, map, some, uniqueBy } from '../../system/iterable';
 import { getLoggableName, Logger } from '../../system/logger';
 import { startLogScope } from '../../system/logger.scope';
 import { basename } from '../../system/path';
@@ -58,7 +58,7 @@ export class FileHistoryNode
 	}
 
 	async getChildren(): Promise<ViewNode[]> {
-		this.view.description = `${this.label}${
+		this.view.description = `${this.view.groupedLabel ? `${this.view.groupedLabel} \u2022 ` : ''}${this.label}${
 			this.parent instanceof FileHistoryTrackerNode && !this.parent.followingEditor ? ' (pinned)' : ''
 		}`;
 
@@ -78,6 +78,7 @@ export class FileHistoryNode
 
 		if (fileStatuses?.length) {
 			if (this.folder) {
+				const relativePath = this.view.container.git.getRelativePath(this.getPathOrGlob(), this.uri.repoPath);
 				// Combine all the working/staged changes into single pseudo commits
 				const commits = map(
 					uniqueBy(
@@ -85,11 +86,10 @@ export class FileHistoryNode
 						c => c.sha,
 						(original, c) =>
 							original.with({
-								files: {
-									files: [
-										...(original.files ?? (original.file != null ? [original.file] : [])),
-										...(c.files ?? (c.file != null ? [c.file] : [])),
-									],
+								fileset: {
+									files: [...(original.fileset?.files ?? []), ...(c.fileset?.files ?? [])],
+									filtered: Boolean(original.fileset?.filtered || c.fileset?.filtered),
+									pathspec: relativePath,
 								},
 							}),
 					),
@@ -155,7 +155,7 @@ export class FileHistoryNode
 			this.uri.sha == null ? '' : `\n\n${this.uri.sha}`
 		}`;
 
-		this.view.description = `${label}${
+		this.view.description = `${this.view.groupedLabel ? `${this.view.groupedLabel} \u2022 ` : ''}${label}${
 			this.parent instanceof FileHistoryTrackerNode && !this.parent.followingEditor ? ' (pinned)' : ''
 		}`;
 
@@ -226,8 +226,8 @@ export class FileHistoryNode
 
 	private onFileSystemChanged(e: RepositoryFileSystemChangeEvent) {
 		if (this.folder) {
-			if (!e.uris.some(uri => uri.fsPath.startsWith(this.uri.fsPath))) return;
-		} else if (!e.uris.some(uri => uri.toString() === this.uri.toString())) {
+			if (!some(e.uris, uri => uri.fsPath.startsWith(this.uri.fsPath))) return;
+		} else if (!e.uris.has(this.uri)) {
 			return;
 		}
 

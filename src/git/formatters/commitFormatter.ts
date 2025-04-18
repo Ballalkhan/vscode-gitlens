@@ -435,7 +435,7 @@ export class CommitFormatter extends Formatter<GitCommit, CommitFormatOptions> {
 				})} "Open Changes with Previous Revision")`;
 
 				commands += ` &nbsp;[$(versions)](${OpenFileAtRevisionCommand.createMarkdownCommandLink(
-					Container.instance.git.getRevisionUri(diffUris.previous),
+					Container.instance.git.getRevisionUriFromGitUri(diffUris.previous),
 					'blame',
 					this._options.editor?.line,
 				)} "Open Blame Prior to this Change")`;
@@ -466,9 +466,9 @@ export class CommitFormatter extends Formatter<GitCommit, CommitFormatOptions> {
 
 		if (this._item.file != null && this._item.unresolvedPreviousSha != null) {
 			const uri = Container.instance.git.getRevisionUri(
+				this._item.repoPath,
 				this._item.unresolvedPreviousSha,
 				this._item.file.originalPath ?? this._item.file?.path,
-				this._item.repoPath,
 			);
 			commands += ` &nbsp;[$(versions)](${OpenFileAtRevisionCommand.createMarkdownCommandLink(
 				uri,
@@ -566,9 +566,7 @@ export class CommitFormatter extends Formatter<GitCommit, CommitFormatOptions> {
 		const gitUri = this._item.getGitUri();
 		commands += `${separator}[$(ellipsis)](${ShowQuickCommitFileCommand.createMarkdownCommandLink(
 			gitUri != null
-				? {
-						revisionUri: Container.instance.git.getRevisionUri(gitUri).toString(true),
-				  }
+				? { revisionUri: Container.instance.git.getRevisionUriFromGitUri(gitUri).toString(true) }
 				: { commit: this._item },
 		)} "Show More Actions")`;
 
@@ -663,7 +661,7 @@ export class CommitFormatter extends Formatter<GitCommit, CommitFormatOptions> {
 		if (isStash(this._item)) {
 			icon = 'archive';
 			label = this._padOrTruncate(
-				`Stash${this._item.number ? ` #${this._item.number}` : ''}`,
+				`Stash${this._item.stashNumber ? ` #${this._item.stashNumber}` : ''}`,
 				this._options.tokenOptions.link,
 			);
 		} else {
@@ -736,7 +734,7 @@ export class CommitFormatter extends Formatter<GitCommit, CommitFormatOptions> {
 			message = encodeHtmlWeak(message);
 		}
 		if (outputFormat === 'markdown') {
-			message = escapeMarkdown(message, { quoted: true, inlineBackticks: true });
+			message = escapeMarkdown(message, { quoted: true, inlineBackticks: true, preserveLinks: true });
 		}
 
 		if (this._options.messageAutolinks) {
@@ -858,7 +856,7 @@ export class CommitFormatter extends Formatter<GitCommit, CommitFormatOptions> {
 	}
 
 	get stashNumber(): string {
-		return this._padOrTruncate(this._item.number ?? '', this._options.tokenOptions.stashNumber);
+		return this._padOrTruncate(this._item.stashNumber ?? '', this._options.tokenOptions.stashNumber);
 	}
 
 	get stashOnRef(): string {

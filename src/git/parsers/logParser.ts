@@ -16,9 +16,7 @@ import type { GitLog } from '../models/log';
 import { uncommitted } from '../models/revision';
 import type { GitUser } from '../models/user';
 import { isUserMatch } from '../utils/user.utils';
-
-const diffRegex = /diff --git a\/(.*) b\/(.*)/;
-const diffRangeRegex = /^@@ -(\d+?),(\d+?) \+(\d+?),(\d+?) @@/;
+import { diffHunkRegex, diffRegex } from './diffParser';
 
 export const fileStatusRegex = /(\S)\S*\t([^\t\n]+)(?:\t(.+))?/;
 const fileStatusAndSummaryRegex = /^(\d+?|-)\s+?(\d+?|-)\s+?(.*)(?:\n\s(delete|rename|copy|create))?/;
@@ -177,24 +175,24 @@ export function getGraphStatsParser(): ParserWithStats<{ sha: string }> {
 	return _graphStatsParser;
 }
 
-type RefParser = Parser<string>;
+type ShaLogParser = Parser<string>;
 
-let _refParser: RefParser | undefined;
-export function getRefParser(): RefParser {
-	_refParser ??= createLogParserSingle('%H');
-	return _refParser;
+let _shaLogParser: ShaLogParser | undefined;
+export function getShaLogParser(): ShaLogParser {
+	_shaLogParser ??= createLogParserSingle('%H');
+	return _shaLogParser;
 }
 
-type RefAndDateParser = Parser<{ sha: string; authorDate: string; committerDate: string }>;
+type ShaAndDatesLogParser = Parser<{ sha: string; authorDate: string; committerDate: string }>;
 
-let _refAndDateParser: RefAndDateParser | undefined;
-export function getRefAndDateParser(): RefAndDateParser {
-	_refAndDateParser ??= createLogParser({
+let _shaAndDatesLogParser: ShaAndDatesLogParser | undefined;
+export function getShaAndDatesLogParser(): ShaAndDatesLogParser {
+	_shaAndDatesLogParser ??= createLogParser({
 		sha: '%H',
 		authorDate: '%at',
 		committerDate: '%ct',
 	});
-	return _refAndDateParser;
+	return _shaAndDatesLogParser;
 }
 
 export function createLogParser<
@@ -735,7 +733,7 @@ export function parseGitLog(
 							void lines.next();
 							next = lines.next();
 
-							match = diffRangeRegex.exec(next.value);
+							match = diffHunkRegex.exec(next.value);
 							if (match !== null) {
 								entry.line = {
 									sha: entry.sha!,
@@ -908,18 +906,27 @@ function parseLogEntry(
 
 		const originalFileName = entry.originalPath ?? (relativeFileName !== entry.path ? entry.path : undefined);
 
-		const files: { file?: GitFileChange; files?: GitFileChange[] } = {
-			files: entry.files?.map(f => new GitFileChange(container, repoPath!, f.path, f.status, f.originalPath)),
+		const fileset = {
+			files:
+				entry.files?.map(f => new GitFileChange(container, repoPath!, f.path, f.status, f.originalPath)) ?? [],
+			filtered: Boolean(relativeFileName),
+			pathspec: relativeFileName,
 		};
 		if (type === LogType.LogFile && relativeFileName != null) {
-			files.file = new GitFileChange(
-				container,
-				repoPath!,
-				relativeFileName,
-				entry.status!,
-				originalFileName,
-				undefined,
-				entry.fileStats,
+			const index = fileset.files.findIndex(f => f.path === relativeFileName);
+			if (index !== -1) {
+				fileset.files.splice(index, 1);
+			}
+			fileset.files.push(
+				new GitFileChange(
+					container,
+					repoPath!,
+					relativeFileName,
+					entry.status!,
+					originalFileName,
+					undefined,
+					entry.fileStats,
+				),
 			);
 		}
 
@@ -934,7 +941,13 @@ function parseLogEntry(
 				stash.summary,
 				stash.parents,
 				stash.message,
-				files,
+				stash.fileset?.files != null
+					? {
+							files: stash.fileset?.files,
+							filtered: Boolean(relativeFileName),
+							pathspec: relativeFileName,
+					  }
+					: undefined,
 				undefined,
 				entry.line != null ? [entry.line] : [],
 				entry.tips,
@@ -962,7 +975,7 @@ function parseLogEntry(
 				entry.summary?.split('\n', 1)[0] ?? '',
 				entry.parentShas ?? [],
 				entry.summary ?? '',
-				files,
+				fileset,
 				undefined,
 				entry.line != null ? [entry.line] : [],
 				entry.tips,

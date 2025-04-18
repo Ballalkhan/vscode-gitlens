@@ -101,7 +101,8 @@ import {
 import { executeCommand } from '../system/-webview/command';
 import { configuration } from '../system/-webview/configuration';
 import { formatPath } from '../system/-webview/formatPath';
-import { getIconPathUris, openWorkspace } from '../system/-webview/vscode';
+import { getIconPathUris } from '../system/-webview/vscode';
+import { openWorkspace } from '../system/-webview/vscode/workspaces';
 import { filterMap, intersection, isStringArray } from '../system/array';
 import { debounce } from '../system/function/debounce';
 import { first, map } from '../system/iterable';
@@ -1123,7 +1124,7 @@ export async function* pickCommitStep<
 	},
 ): AsyncStepResultGenerator<GitCommit> {
 	async function getItems(log: GitLog | undefined) {
-		if (log == null) {
+		if (!log?.commits.size) {
 			return [createDirectiveQuickPickItem(Directive.Back, true), createDirectiveQuickPickItem(Directive.Cancel)];
 		}
 
@@ -2241,7 +2242,7 @@ export function* showCommitOrStashFilesStep<
 	context: Context,
 	options?: { picked?: string },
 ): StepResultGenerator<CommitFilesQuickPickItem | CommitFileQuickPickItem> {
-	if (state.reference.files == null) {
+	if (state.reference.fileset?.files == null) {
 		debugger;
 	}
 
@@ -2262,7 +2263,7 @@ export function* showCommitOrStashFilesStep<
 				hint: `Click to see ${isStash(state.reference) ? 'stash' : 'commit'} actions`,
 			}),
 			createQuickPickSeparator('Files'),
-			...(state.reference.files?.map(
+			...(state.reference.fileset?.files.map(
 				fs => new CommitFileQuickPickItem(state.reference, fs, options?.picked === fs.path),
 			) ?? []),
 		] as (CommitFilesQuickPickItem | CommitFileQuickPickItem)[],

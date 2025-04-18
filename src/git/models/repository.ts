@@ -11,13 +11,15 @@ import type { RepoComparisonKey } from '../../repositories';
 import { asRepoComparisonKey } from '../../repositories';
 import { executeActionCommand } from '../../system/-webview/command';
 import { configuration } from '../../system/-webview/configuration';
+import { UriSet } from '../../system/-webview/uriMap';
+import { exists } from '../../system/-webview/vscode/uris';
 import { getScopedCounter } from '../../system/counter';
 import { gate } from '../../system/decorators/-webview/gate';
 import { memoize } from '../../system/decorators/-webview/memoize';
 import { debug, log, logName } from '../../system/decorators/log';
 import type { Deferrable } from '../../system/function/debounce';
 import { debounce } from '../../system/function/debounce';
-import { filter, groupByMap, join, min, some } from '../../system/iterable';
+import { filter, groupByMap, join, map, min, some } from '../../system/iterable';
 import { getLoggableName, Logger } from '../../system/logger';
 import { getLogScope, startLogScope } from '../../system/logger.scope';
 import { updateRecordValue } from '../../system/object';
@@ -29,7 +31,12 @@ import { getReferenceNameWithoutRemote, isBranchReference } from '../utils/refer
 import type { GitBranch } from './branch';
 import type { GitBranchReference, GitReference } from './reference';
 
-type GitProviderRepoKeys = keyof GitRepositoryProvider | 'supports';
+type GitProviderRepoKeys =
+	| keyof GitRepositoryProvider
+	| 'getBestRevisionUri'
+	| 'getRevisionUri'
+	| 'getWorkingUri'
+	| 'supports';
 
 export type GitProviderServiceForRepo = Pick<
 	{
@@ -139,7 +146,7 @@ export class RepositoryChangeEvent {
 
 export interface RepositoryFileSystemChangeEvent {
 	readonly repository: Repository;
-	readonly uris: Uri[];
+	readonly uris: UriSet;
 }
 
 const instanceCounter = getScopedCounter();
@@ -416,8 +423,8 @@ export class Repository implements Disposable {
 	}
 
 	private onFileSystemChanged(uri: Uri) {
-		// Ignore .git changes
-		if (/\.git(?:\/|\\|$)/.test(uri.fsPath)) return;
+		// Ignore node_modules and .git changes
+		if (/(?:(?:\/|\\)node_modules|\.git)(?:\/|\\|$)/.test(uri.fsPath)) return;
 
 		this._etagFileSystem = Date.now();
 		this.fireFileSystemChange(uri);
@@ -567,11 +574,6 @@ export class Repository implements Disposable {
 				);
 			}
 		}
-	}
-
-	@log()
-	cherryPick(...args: string[]): void {
-		void this.runTerminalCommand('cherry-pick', ...args);
 	}
 
 	containsUri(uri: Uri): boolean {
@@ -835,9 +837,11 @@ export class Repository implements Disposable {
 		}
 	}
 
-	toAbsoluteUri(path: string, options?: { validate?: boolean }): Uri | undefined {
+	async getAbsoluteOrBestRevisionUri(path: string, rev: string | undefined): Promise<Uri | undefined> {
 		const uri = this.container.git.getAbsoluteUri(path, this.uri);
-		return !(options?.validate ?? true) || this.containsUri(uri) ? uri : undefined;
+		if (uri != null && this.containsUri(uri) && (await exists(uri))) return uri;
+
+		return rev != null ? this.git.getBestRevisionUri(path, rev) : undefined;
 	}
 
 	unstar(branch?: GitBranch): Promise<void> {
@@ -870,6 +874,38 @@ export class Repository implements Disposable {
 
 	suspend(): void {
 		this._suspended = true;
+	}
+
+	waitForRepoChange(timeoutMs: number): Promise<boolean> {
+		return new Promise<boolean>(resolve => {
+			let timeoutId: NodeJS.Timeout | undefined;
+			let listener: Disposable | undefined;
+
+			const cleanup = () => {
+				if (timeoutId != null) {
+					clearTimeout(timeoutId);
+					timeoutId = undefined;
+				}
+				listener?.dispose();
+				listener = undefined;
+			};
+
+			const timeoutPromise = new Promise<false>(r => {
+				timeoutId = setTimeout(() => {
+					cleanup();
+					r(false);
+				}, timeoutMs);
+			});
+
+			const changePromise = new Promise<true>(r => {
+				listener = this.onDidChange(() => {
+					cleanup();
+					r(true);
+				});
+			});
+
+			void Promise.race([timeoutPromise, changePromise]).then(result => resolve(result));
+		});
 	}
 
 	private _fsWatcherDisposable: Disposable | undefined;
@@ -966,12 +1002,18 @@ export class Repository implements Disposable {
 
 		this._fireFileSystemChangeDebounced ??= debounce(this.fireFileSystemChangeCore.bind(this), this._fsChangeDelay);
 
-		this._pendingFileSystemChange ??= { repository: this, uris: [] };
+		this._pendingFileSystemChange ??= { repository: this, uris: new UriSet() };
 		const e = this._pendingFileSystemChange;
-		e.uris.push(uri);
+		e.uris.add(uri);
 
 		if (this._suspended) {
-			Logger.debug(scope, `queueing suspended fs changes=${e.uris.map(u => u.fsPath).join(', ')}`);
+			Logger.debug(
+				scope,
+				`queueing suspended fs changes=${join(
+					map(e.uris, u => u.fsPath),
+					', ',
+				)}`,
+			);
 			return;
 		}
 
@@ -984,15 +1026,21 @@ export class Repository implements Disposable {
 
 		this._pendingFileSystemChange = undefined;
 
-		const uris = await this.git.excludeIgnoredUris(e.uris);
-		if (uris.length === 0) return;
+		const uris = await this.git.excludeIgnoredUris([...e.uris]);
+		if (!uris.length) return;
 
-		if (uris.length !== e.uris.length) {
-			e = { ...e, uris: uris };
+		if (uris.length !== e.uris.size) {
+			e = { ...e, uris: new UriSet(uris) };
 		}
 
 		using scope = startLogScope(`${getLoggableName(this)}.fireChangeCore`, false);
-		Logger.debug(scope, `firing fs changes=${e.uris.map(u => u.fsPath).join(', ')}`);
+		Logger.debug(
+			scope,
+			`firing fs changes=${join(
+				map(e.uris, u => u.fsPath),
+				', ',
+			)}`,
+		);
 
 		this._onDidChangeFileSystem.fire(e);
 	}

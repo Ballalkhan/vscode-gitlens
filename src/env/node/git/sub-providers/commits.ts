@@ -4,11 +4,12 @@ import type { SearchQuery } from '../../../../constants.search';
 import type { Container } from '../../../../container';
 import type { GitCache } from '../../../../git/cache';
 import { GitErrorHandling } from '../../../../git/commandOptions';
+import { CherryPickError, CherryPickErrorReason } from '../../../../git/errors';
 import type { GitCommitsSubProvider, LeftRightCommitCountResult } from '../../../../git/gitProvider';
 import { GitUri } from '../../../../git/gitUri';
 import type { GitBlame } from '../../../../git/models/blame';
 import type { GitCommit, GitStashCommit } from '../../../../git/models/commit';
-import type { GitDiffFile } from '../../../../git/models/diff';
+import type { ParsedGitDiffHunks } from '../../../../git/models/diff';
 import type { GitFile } from '../../../../git/models/file';
 import { GitFileChange } from '../../../../git/models/fileChange';
 import type { GitFileStatus } from '../../../../git/models/fileStatus';
@@ -21,6 +22,7 @@ import { parseGitDiffNameStatusFiles } from '../../../../git/parsers/diffParser'
 import {
 	createLogParserSingle,
 	createLogParserWithFilesAndStats,
+	getShaAndDatesLogParser,
 	LogType,
 	parseGitLog,
 	parseGitLogAllFormat,
@@ -41,10 +43,10 @@ import { isFolderGlob } from '../../../../system/path';
 import type { CachedLog, TrackedGitDocument } from '../../../../trackers/trackedDocument';
 import { GitDocumentState } from '../../../../trackers/trackedDocument';
 import type { Git } from '../git';
-import { gitLogDefaultConfigs, gitLogDefaultConfigsWithFiles } from '../git';
+import { GitErrors, gitLogDefaultConfigs, gitLogDefaultConfigsWithFiles } from '../git';
 import type { LocalGitProvider } from '../localGitProvider';
 
-const emptyPromise: Promise<GitBlame | GitDiffFile | GitLog | undefined> = Promise.resolve(undefined);
+const emptyPromise: Promise<GitBlame | ParsedGitDiffHunks | GitLog | undefined> = Promise.resolve(undefined);
 const reflogCommands = ['merge', 'pull'];
 
 export class CommitsGitSubProvider implements GitCommitsSubProvider {
@@ -57,6 +59,61 @@ export class CommitsGitSubProvider implements GitCommitsSubProvider {
 
 	private get useCaching() {
 		return configuration.get('advanced.caching.enabled');
+	}
+
+	@log()
+	async cherryPick(
+		repoPath: string,
+		revs: string[],
+		options?: { edit?: boolean; noCommit?: boolean },
+	): Promise<void> {
+		const args = ['cherry-pick'];
+		if (options?.edit) {
+			args.push('-e');
+		}
+		if (options?.noCommit) {
+			args.push('-n');
+		}
+
+		if (revs.length > 1) {
+			const parser = getShaAndDatesLogParser();
+			// Ensure the revs are in reverse committer date order
+			const data = await this.git.exec(
+				{ cwd: repoPath, stdin: join(revs, '\n') },
+				'log',
+				'--no-walk',
+				'--stdin',
+				...parser.arguments,
+				'--',
+			);
+			const commits = [...parser.parse(data)].sort(
+				(c1, c2) => Number(c1.committerDate) - Number(c2.committerDate),
+			);
+			revs = commits.map(c => c.sha);
+		}
+
+		args.push(...revs);
+
+		try {
+			await this.git.exec({ cwd: repoPath, errors: GitErrorHandling.Throw }, ...args);
+		} catch (ex) {
+			const msg: string = ex?.toString() ?? '';
+
+			let reason: CherryPickErrorReason = CherryPickErrorReason.Other;
+			if (
+				GitErrors.changesWouldBeOverwritten.test(msg) ||
+				GitErrors.changesWouldBeOverwritten.test(ex.stderr ?? '')
+			) {
+				reason = CherryPickErrorReason.AbortedWouldOverwrite;
+			} else if (GitErrors.conflict.test(msg) || GitErrors.conflict.test(ex.stdout ?? '')) {
+				reason = CherryPickErrorReason.Conflicts;
+			} else if (GitErrors.emptyPreviousCherryPick.test(msg)) {
+				reason = CherryPickErrorReason.EmptyCommit;
+			}
+
+			debugger;
+			throw new CherryPickError(reason, ex, revs);
+		}
 	}
 
 	@log()

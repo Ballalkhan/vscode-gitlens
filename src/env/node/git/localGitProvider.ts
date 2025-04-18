@@ -35,7 +35,7 @@ import { isGitUri } from '../../../git/gitUri';
 import { encodeGitLensRevisionUriAuthority } from '../../../git/gitUri.authority';
 import type { GitBlame, GitBlameAuthor, GitBlameLine } from '../../../git/models/blame';
 import type { GitCommit } from '../../../git/models/commit';
-import type { GitDiffFile, GitDiffLine } from '../../../git/models/diff';
+import type { GitLineDiff, ParsedGitDiffHunks } from '../../../git/models/diff';
 import type { GitLog } from '../../../git/models/log';
 import type { GitBranchReference, GitReference } from '../../../git/models/reference';
 import type { GitRemote } from '../../../git/models/remote';
@@ -60,6 +60,7 @@ import {
 } from '../../../messages';
 import { asRepoComparisonKey } from '../../../repositories';
 import { configuration } from '../../../system/-webview/configuration';
+import { setContext } from '../../../system/-webview/context';
 import { getBestPath, isFolderUri, relative, splitPath } from '../../../system/-webview/path';
 import { gate } from '../../../system/decorators/-webview/gate';
 import { debug, log } from '../../../system/decorators/log';
@@ -95,7 +96,7 @@ import { StatusGitSubProvider } from './sub-providers/status';
 import { TagsGitSubProvider } from './sub-providers/tags';
 import { WorktreesGitSubProvider } from './sub-providers/worktrees';
 
-const emptyPromise: Promise<GitBlame | GitDiffFile | GitLog | undefined> = Promise.resolve(undefined);
+const emptyPromise: Promise<GitBlame | ParsedGitDiffHunks | GitLog | undefined> = Promise.resolve(undefined);
 const slash = 47;
 
 const RepoSearchWarnings = {
@@ -463,21 +464,22 @@ export class LocalGitProvider implements GitProvider, Disposable {
 		if (supported != null) return supported;
 
 		switch (feature) {
-			case 'worktrees' satisfies Features:
-				supported = await this.git.isAtLeastVersion('2.17.0');
-				this._supportedFeatures.set(feature, supported);
-				return supported;
-			case 'stashOnlyStaged' satisfies Features:
-				supported = await this.git.isAtLeastVersion('2.35.0');
-				this._supportedFeatures.set(feature, supported);
-				return supported;
-			case 'forceIfIncludes' satisfies Features:
-				supported = await this.git.isAtLeastVersion('2.30.0');
-				this._supportedFeatures.set(feature, supported);
-				return supported;
+			case 'stashes' satisfies Features:
+			case 'timeline' satisfies Features:
+				supported = true;
+				break;
 			default:
-				return true;
+				if (feature.startsWith('git:')) {
+					supported = await this.git.supports(feature);
+				} else {
+					supported = true;
+				}
+				break;
 		}
+
+		void setContext(`gitlens:feature:unsupported:${feature}`, !supported);
+		this._supportedFeatures.set(feature, supported);
+		return supported;
 	}
 
 	@debug<LocalGitProvider['visibility']>({ exit: r => `returned ${r[0]}` })
@@ -516,7 +518,7 @@ export class LocalGitProvider implements GitProvider, Disposable {
 			case 'gitea':
 			case 'gerrit':
 			case 'google-source':
-				url = remote.provider.url({ type: RemoteResourceType.Repo });
+				url = await remote.provider.url({ type: RemoteResourceType.Repo });
 				if (url == null) return ['private', remote];
 
 				break;
@@ -775,11 +777,11 @@ export class LocalGitProvider implements GitProvider, Disposable {
 	}
 
 	@log({ exit: true })
-	async getBestRevisionUri(repoPath: string, path: string, ref: string | undefined): Promise<Uri | undefined> {
-		if (ref === deletedOrMissing) return undefined;
+	async getBestRevisionUri(repoPath: string, path: string, rev: string | undefined): Promise<Uri | undefined> {
+		if (rev === deletedOrMissing) return undefined;
 
 		// TODO@eamodio Align this with isTrackedCore?
-		if (!ref || (isUncommitted(ref) && !isUncommittedStaged(ref))) {
+		if (!rev || (isUncommitted(rev) && !isUncommittedStaged(rev))) {
 			// Make sure the file exists in the repo
 			let data = await this.git.ls_files(repoPath, path);
 			if (data != null) return this.getAbsoluteUri(path, repoPath);
@@ -792,7 +794,7 @@ export class LocalGitProvider implements GitProvider, Disposable {
 		}
 
 		// If the ref is the index, then try to create a Uri using the Git extension, but if we can't find a repo for it, then generate our own Uri
-		if (isUncommittedStaged(ref)) {
+		if (isUncommittedStaged(rev)) {
 			let scmRepo = await this.getScmRepository(repoPath);
 			if (scmRepo == null) {
 				// If the repoPath is a canonical path, then we need to remap it to the real path, because the vscode.git extension always uses the real path
@@ -807,7 +809,7 @@ export class LocalGitProvider implements GitProvider, Disposable {
 			}
 		}
 
-		return this.getRevisionUri(repoPath, path, ref);
+		return this.getRevisionUri(repoPath, rev, path);
 	}
 
 	getRelativePath(pathOrUri: string | Uri, base: string | Uri): string {
@@ -846,8 +848,8 @@ export class LocalGitProvider implements GitProvider, Disposable {
 		return normalizePath(relativePath);
 	}
 
-	getRevisionUri(repoPath: string, path: string, ref: string): Uri {
-		if (isUncommitted(ref) && !isUncommittedStaged(ref)) return this.getAbsoluteUri(path, repoPath);
+	getRevisionUri(repoPath: string, rev: string, path: string): Uri {
+		if (isUncommitted(rev) && !isUncommittedStaged(rev)) return this.getAbsoluteUri(path, repoPath);
 
 		let uncPath;
 
@@ -864,7 +866,7 @@ export class LocalGitProvider implements GitProvider, Disposable {
 		}
 
 		const metadata: RevisionUriData = {
-			ref: ref,
+			ref: rev,
 			repoPath: normalizePath(repoPath),
 			uncPath: uncPath,
 		};
@@ -874,8 +876,8 @@ export class LocalGitProvider implements GitProvider, Disposable {
 			authority: encodeGitLensRevisionUriAuthority(metadata),
 			path: path,
 			// Replace `/` with `\u2009\u2215\u2009` so that it doesn't get treated as part of the path of the file
-			query: ref
-				? JSON.stringify({ ref: shortenRevision(ref).replaceAll('/', '\u2009\u2215\u2009') })
+			query: rev
+				? JSON.stringify({ ref: shortenRevision(rev).replaceAll('/', '\u2009\u2215\u2009') })
 				: undefined,
 		});
 		return uri;
@@ -1696,7 +1698,11 @@ export class LocalGitProvider implements GitProvider, Disposable {
 	}
 
 	@log()
-	async getDiffForFile(uri: GitUri, ref1: string | undefined, ref2?: string): Promise<GitDiffFile | undefined> {
+	async getDiffForFile(
+		uri: GitUri,
+		ref1: string | undefined,
+		ref2?: string,
+	): Promise<ParsedGitDiffHunks | undefined> {
 		const scope = getLogScope();
 
 		let key = 'diff';
@@ -1738,7 +1744,7 @@ export class LocalGitProvider implements GitProvider, Disposable {
 			Logger.debug(scope, `Cache add: '${key}'`);
 
 			const value: CachedDiff = {
-				item: promise as Promise<GitDiffFile>,
+				item: promise as Promise<ParsedGitDiffHunks>,
 			};
 			doc.state.setDiff(key, value);
 		}
@@ -1755,7 +1761,7 @@ export class LocalGitProvider implements GitProvider, Disposable {
 		document: TrackedGitDocument,
 		key: string,
 		scope: LogScope | undefined,
-	): Promise<GitDiffFile | undefined> {
+	): Promise<ParsedGitDiffHunks | undefined> {
 		const [relativePath, root] = splitPath(path, repoPath);
 
 		try {
@@ -1776,12 +1782,12 @@ export class LocalGitProvider implements GitProvider, Disposable {
 				Logger.debug(scope, `Cache replace (with empty promise): '${key}'`);
 
 				const value: CachedDiff = {
-					item: emptyPromise as Promise<GitDiffFile>,
+					item: emptyPromise as Promise<ParsedGitDiffHunks>,
 					errorMessage: msg,
 				};
 				document.state.setDiff(key, value);
 
-				return emptyPromise as Promise<GitDiffFile>;
+				return emptyPromise as Promise<ParsedGitDiffHunks>;
 			}
 
 			return undefined;
@@ -1789,7 +1795,7 @@ export class LocalGitProvider implements GitProvider, Disposable {
 	}
 
 	@log<LocalGitProvider['getDiffForFileContents']>({ args: { 1: '<contents>' } })
-	async getDiffForFileContents(uri: GitUri, ref: string, contents: string): Promise<GitDiffFile | undefined> {
+	async getDiffForFileContents(uri: GitUri, ref: string, contents: string): Promise<ParsedGitDiffHunks | undefined> {
 		const scope = getLogScope();
 
 		const key = `diff:${md5(contents)}`;
@@ -1825,7 +1831,7 @@ export class LocalGitProvider implements GitProvider, Disposable {
 			Logger.debug(scope, `Cache add: '${key}'`);
 
 			const value: CachedDiff = {
-				item: promise as Promise<GitDiffFile>,
+				item: promise as Promise<ParsedGitDiffHunks>,
 			};
 			doc.state.setDiff(key, value);
 		}
@@ -1842,7 +1848,7 @@ export class LocalGitProvider implements GitProvider, Disposable {
 		document: TrackedGitDocument,
 		key: string,
 		scope: LogScope | undefined,
-	): Promise<GitDiffFile | undefined> {
+	): Promise<ParsedGitDiffHunks | undefined> {
 		const [relativePath, root] = splitPath(path, repoPath);
 
 		try {
@@ -1861,12 +1867,12 @@ export class LocalGitProvider implements GitProvider, Disposable {
 				Logger.debug(scope, `Cache replace (with empty promise): '${key}'`);
 
 				const value: CachedDiff = {
-					item: emptyPromise as Promise<GitDiffFile>,
+					item: emptyPromise as Promise<ParsedGitDiffHunks>,
 					errorMessage: msg,
 				};
 				document.state.setDiff(key, value);
 
-				return emptyPromise as Promise<GitDiffFile>;
+				return emptyPromise as Promise<ParsedGitDiffHunks>;
 			}
 
 			return undefined;
@@ -1879,7 +1885,7 @@ export class LocalGitProvider implements GitProvider, Disposable {
 		editorLine: number, // 0-based, Git is 1-based
 		ref1: string | undefined,
 		ref2?: string,
-	): Promise<GitDiffLine | undefined> {
+	): Promise<GitLineDiff | undefined> {
 		try {
 			const diff = await this.getDiffForFile(uri, ref1, ref2);
 			if (diff == null) return undefined;

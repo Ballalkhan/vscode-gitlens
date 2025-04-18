@@ -17,7 +17,7 @@ import type {
 	AzureRemoteRepositoryDescriptor,
 	AzureRepositoryDescriptor,
 } from './azure/models';
-import type { ProviderPullRequest } from './models';
+import type { ProviderPullRequest, ProviderRepository } from './models';
 import { fromProviderIssue, fromProviderPullRequest, providersMetadata } from './models';
 
 const metadata = providersMetadata[HostingIntegrationId.AzureDevOps];
@@ -220,7 +220,7 @@ export class AzureDevOpsIntegration extends HostingIntegration<
 	protected override async getProviderAccountForCommit(
 		_session: AuthenticationSession,
 		_repo: AzureRepositoryDescriptor,
-		_ref: string,
+		_rev: string,
 		_options?: {
 			avatarSize?: number;
 		},
@@ -295,9 +295,20 @@ export class AzureDevOpsIntegration extends HostingIntegration<
 	protected override async getProviderPullRequestForCommit(
 		_session: AuthenticationSession,
 		_repo: AzureRepositoryDescriptor,
-		_ref: string,
+		_rev: string,
 	): Promise<PullRequest | undefined> {
 		return Promise.resolve(undefined);
+	}
+
+	public override async getRepoInfo(repo: {
+		owner: string;
+		name: string;
+		project: string;
+	}): Promise<ProviderRepository | undefined> {
+		const api = await this.getProvidersApi();
+		return api.getRepo(this.id, repo.owner, repo.name, repo.project, {
+			accessToken: this._session?.accessToken,
+		});
 	}
 
 	protected override async getProviderRepositoryMetadata(

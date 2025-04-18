@@ -7,7 +7,7 @@ import type { PullRequest } from '../../models/pullRequest';
 
 export async function getBranchTargetInfo(
 	container: Container,
-	current: GitBranch,
+	branch: GitBranch,
 	options?: {
 		associatedPullRequest?: Promise<PullRequest | undefined>;
 		cancellation?: CancellationToken;
@@ -15,9 +15,9 @@ export async function getBranchTargetInfo(
 	},
 ): Promise<BranchTargetInfo> {
 	const [baseResult, defaultResult, targetResult] = await Promise.allSettled([
-		container.git.branches(current.repoPath).getBaseBranchName?.(current.name),
-		getDefaultBranchName(container, current.repoPath, current.getRemoteName()),
-		getTargetBranchName(container, current, {
+		container.git.branches(branch.repoPath).getBaseBranchName?.(branch.name),
+		getDefaultBranchName(container, branch.repoPath, branch.getRemoteName()),
+		getTargetBranchName(container, branch, {
 			cancellation: options?.cancellation,
 			timeout: options?.timeout,
 		}),
@@ -48,7 +48,7 @@ export async function getDefaultBranchName(
 
 	const integration = await remote.getIntegration();
 	const defaultBranch = await integration?.getDefaultBranch?.(remote.provider.repoDesc, options);
-	return `${remote.name}/${defaultBranch?.name}`;
+	return defaultBranch && `${remote.name}/${defaultBranch?.name}`;
 }
 
 export async function getTargetBranchName(

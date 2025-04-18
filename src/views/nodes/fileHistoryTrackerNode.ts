@@ -8,7 +8,7 @@ import { isSha } from '../../git/utils/revision.utils';
 import { showReferencePicker } from '../../quickpicks/referencePicker';
 import { setContext } from '../../system/-webview/context';
 import { isFolderUri } from '../../system/-webview/path';
-import { isVirtualUri } from '../../system/-webview/vscode';
+import { isVirtualUri } from '../../system/-webview/vscode/uris';
 import { gate } from '../../system/decorators/-webview/gate';
 import { debug, log } from '../../system/decorators/log';
 import { weakEvent } from '../../system/event';
@@ -49,8 +49,10 @@ export class FileHistoryTrackerNode extends SubscribeableViewNode<'file-history-
 
 	async getChildren(): Promise<ViewNode[]> {
 		if (this.child == null) {
+			this.view.groupedLabel ??= this.view.name.toLocaleLowerCase();
+
 			if (!this.hasUri) {
-				this.view.description = undefined;
+				this.view.description = this.view.grouped ? this.view.groupedLabel : undefined;
 
 				this.view.message = 'There are no editors open that can provide file history information.';
 				return [];
@@ -66,7 +68,12 @@ export class FileHistoryTrackerNode extends SubscribeableViewNode<'file-history-
 			const fileUri = new GitUri(this.uri, commitish);
 			const folder = await isFolderUri(this.uri);
 
-			this.view.title = folder ? 'Folder History' : 'File History';
+			if (this.view.grouped) {
+				this.view.groupedLabel = (folder ? 'Folder History' : 'File History').toLocaleLowerCase();
+				this.view.description = this.view.groupedLabel;
+			} else {
+				this.view.title = folder ? 'Folder History' : 'File History';
+			}
 
 			let branch;
 			if (!commitish.sha || commitish.sha === 'HEAD') {

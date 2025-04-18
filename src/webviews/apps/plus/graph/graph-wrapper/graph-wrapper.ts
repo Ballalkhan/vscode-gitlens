@@ -1,21 +1,13 @@
 import type GraphContainer from '@gitkraken/gitkraken-components';
-import type { GraphRef, GraphRow, GraphZoneType } from '@gitkraken/gitkraken-components';
+import type { GraphRow, GraphZoneType } from '@gitkraken/gitkraken-components';
 import { refZone } from '@gitkraken/gitkraken-components';
 import { consume } from '@lit/context';
 import { SignalWatcher } from '@lit-labs/signals';
-import r2wc from '@r2wc/react-to-web-component';
 import { html, LitElement } from 'lit';
 import { customElement, query } from 'lit/decorators.js';
 import { ifDefined } from 'lit/directives/if-defined.js';
 import type { GitGraphRowType } from '../../../../../git/models/graph';
-import type {
-	GraphAvatars,
-	GraphColumnsConfig,
-	GraphExcludedRef,
-	GraphMissingRefsMetadata,
-	GraphRefMetadataItem,
-	UpdateGraphConfigurationParams,
-} from '../../../../plus/graph/protocol';
+import { debounce } from '../../../../../system/decorators/debounce';
 import {
 	DoubleClickedCommandType,
 	GetMissingAvatarsCommand,
@@ -31,88 +23,19 @@ import type { CustomEventType } from '../../../shared/components/element';
 import { ipcContext } from '../../../shared/contexts/ipc';
 import type { TelemetryContext } from '../../../shared/contexts/telemetry';
 import { telemetryContext } from '../../../shared/contexts/telemetry';
-import type { GlGraphHover } from '../../graph/hover/graphHover';
 import { stateContext } from '../context';
+import type { GlGraphHover } from '../hover/graphHover';
 import { graphStateContext } from '../stateProvider';
-import { GraphWrapperReact } from './graph-wrapper.react';
-import '../../graph/hover/graphHover';
-
-const WebGraph = r2wc(GraphWrapperReact, {
-	props: {
-		activeRow: 'string',
-		filter: 'json',
-		avatars: 'json',
-		columns: 'json',
-		context: 'json',
-		theming: 'json',
-		config: 'json',
-		downstreams: 'json',
-		excludeRefs: 'json',
-		excludeTypes: 'json',
-		rows: 'json',
-		includeOnlyRefs: 'json',
-		windowFocused: 'boolean',
-		loading: 'boolean',
-		selectedRows: 'json',
-		nonce: 'string',
-		refsMetadata: 'json',
-		rowsStats: 'json',
-		workingTreeStats: 'json',
-		paging: 'json',
-		setRef: 'function',
-		searchResults: 'json',
-	},
-
-	events: [
-		'onChangeColumns',
-		'onGraphMouseLeave',
-		'onChangeRefsVisibility',
-		'onChangeSelection',
-		'onDoubleClickRef',
-		'onDoubleClickRow',
-		'onMissingAvatars',
-		'onMissingRefsMetadata',
-		'onMoreRows',
-		'onChangeVisibleDays',
-		'onGraphRowHovered',
-		'onGraphRowUnhovered',
-		'onRowContextMenu',
-	],
-});
-
-customElements.define('web-graph', WebGraph);
+import type { WebGraph } from './graph-wrapper-element';
+import '../hover/graphHover';
+import './graph-wrapper-element';
 
 declare global {
-	interface HTMLElementTagNameMap {
-		'gl-graph-wrapper': GLGraphWrapper;
-	}
+	// interface HTMLElementTagNameMap {
+	// 	'gl-graph-wrapper': GlGraphWrapper;
+	// }
 
 	interface GlobalEventHandlersEventMap {
-		// event map from react wrapped component
-		'graph-changecolumns': CustomEvent<{ settings: GraphColumnsConfig }>;
-		'graph-changegraphconfiguration': CustomEvent<UpdateGraphConfigurationParams['changes']>;
-		'graph-changerefsvisibility': CustomEvent<{ refs: GraphExcludedRef[]; visible: boolean }>;
-		'graph-changeselection': CustomEvent<GraphRow[]>;
-		'graph-doubleclickref': CustomEvent<{ ref: GraphRef; metadata?: GraphRefMetadataItem }>;
-		'graph-doubleclickrow': CustomEvent<{ row: GraphRow; preserveFocus?: boolean }>;
-		'graph-missingavatars': CustomEvent<GraphAvatars>;
-		'graph-missingrefsmetadata': CustomEvent<GraphMissingRefsMetadata>;
-		'graph-morerows': CustomEvent<string | undefined>;
-		'graph-changevisibledays': CustomEvent<{ top: number; bottom: number }>;
-		'graph-graphrowhovered': CustomEvent<{
-			clientX: number;
-			currentTarget: HTMLElement;
-			graphZoneType: GraphZoneType;
-			graphRow: GraphRow;
-		}>;
-		'graph-graphrowunhovered': CustomEvent<{
-			relatedTarget: HTMLElement;
-			graphZoneType: GraphZoneType;
-			graphRow: GraphRow;
-		}>;
-		'graph-rowcontextmenu': CustomEvent<void>;
-		'graph-graphmouseleave': CustomEvent<void>;
-
 		// passing up event map
 		'gl-graph-mouse-leave': CustomEvent<void>;
 		'gl-graph-change-visible-days': CustomEvent<{ top: number; bottom: number }>;
@@ -121,7 +44,7 @@ declare global {
 }
 
 @customElement('gl-graph-wrapper')
-export class GLGraphWrapper extends SignalWatcher(LitElement) {
+export class GlGraphWrapper extends SignalWatcher(LitElement) {
 	// use Light DOM
 	protected override createRenderRoot(): HTMLElement | DocumentFragment {
 		return this;
@@ -149,6 +72,7 @@ export class GLGraphWrapper extends SignalWatcher(LitElement) {
 		this._ipc.sendCommand(GetMoreRowsCommand, { id: sha });
 	}
 
+	@debounce(250)
 	private onColumnsChanged(event: CustomEventType<'graph-changecolumns'>) {
 		this._ipc.sendCommand(UpdateColumnsCommand, {
 			config: event.detail.settings,
@@ -179,6 +103,7 @@ export class GLGraphWrapper extends SignalWatcher(LitElement) {
 		this._ipc.sendCommand(UpdateGraphConfigurationCommand, { changes: changes });
 	}
 
+	@debounce(250)
 	private onSelectionChanged({ detail: rows }: CustomEventType<'graph-changeselection'>) {
 		const selection = rows.filter(r => r != null).map(r => ({ id: r.sha, type: r.type as GitGraphRowType }));
 		this._telemetry.sendEvent({ name: 'graph/row/selected', data: { rows: selection.length } });
@@ -301,7 +226,7 @@ export class GLGraphWrapper extends SignalWatcher(LitElement) {
 					// eslint-disable-next-line lit/no-this-assign-in-render
 					this.ref = ref;
 				}}
-				.filter=${{ ...this.graphAppState.filter }}
+				.filter=${this.graphAppState.filter}
 				@changecolumns=${this.onColumnsChanged}
 				@changegraphconfiguration=${this.onGraphConfigurationChanged}
 				@changerefsvisibility=${this.onRefsVisibilityChanged}

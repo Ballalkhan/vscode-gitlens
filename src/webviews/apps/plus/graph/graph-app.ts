@@ -5,12 +5,12 @@ import { customElement, query } from 'lit/decorators.js';
 import { when } from 'lit/directives/when.js';
 import type { CustomEventType } from '../../shared/components/element';
 import { emitTelemetrySentEvent } from '../../shared/telemetry';
-import type { GraphMinimapDaySelectedEventDetail } from '../graph/minimap/minimap';
-import type { GlGraphMinimapContainer } from '../graph/minimap/minimap-container';
 import { stateContext } from './context';
-import type { GLGraphWrapper } from './graph-wrapper/graph-wrapper';
+import type { GlGraphWrapper } from './graph-wrapper/graph-wrapper';
+import type { GraphMinimapDaySelectedEventDetail } from './minimap/minimap';
+import type { GlGraphMinimapContainer } from './minimap/minimap-container';
 import { graphStateContext } from './stateProvider';
-import '../graph/minimap/minimap-container';
+import './minimap/minimap-container';
 import './graph-wrapper/graph-wrapper';
 import './sidebar/sidebar';
 import './graph-header';
@@ -32,7 +32,7 @@ export class GraphAppWC extends SignalWatcher(LitElement) {
 	minimapEl!: GlGraphMinimapContainer;
 
 	@query('gl-graph-wrapper')
-	graphWrapper!: GLGraphWrapper;
+	graphWrapper!: GlGraphWrapper;
 
 	private handleHeaderSearchNavigation(e: CustomEventType<'gl-select-commits'>) {
 		this.graphWrapper.selectCommits([e.detail], false, true);

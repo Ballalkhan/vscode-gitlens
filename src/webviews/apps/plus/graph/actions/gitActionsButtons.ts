@@ -11,6 +11,12 @@ import '../../../shared/components/overlays/tooltip';
 
 @customElement('gl-git-actions-buttons')
 export class GitActionsButtons extends LitElement {
+	static override styles = css`
+		:host {
+			display: contents;
+		}
+	`;
+
 	@property({ type: Object })
 	branchState?: BranchState;
 
@@ -110,6 +116,10 @@ export class PushPullButton extends LitElement {
 		actionButton,
 		ruleBase,
 		css`
+			:host {
+				display: contents;
+			}
+
 			.pill {
 				display: inline-block;
 				padding: 0.2rem 0.5rem;

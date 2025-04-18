@@ -133,7 +133,8 @@ export class BranchesGitSubProvider implements GitBranchesSubProvider {
 		if (resultsPromise == null) {
 			async function load(this: BranchesGitSubProvider): Promise<PagedResult<GitBranch>> {
 				try {
-					const parser = getBranchParser();
+					const supportsWorktreePath = await this.git.supports('git:for-each-ref:worktreePath');
+					const parser = getBranchParser(supportsWorktreePath);
 
 					const data = await this.git.exec(
 						{ cwd: repoPath },
@@ -167,7 +168,7 @@ export class BranchesGitSubProvider implements GitBranchesSubProvider {
 							hasCurrent = true;
 						}
 
-						const worktreePath = normalizePath(entry.worktreePath);
+						const worktreePath = entry.worktreePath ? normalizePath(entry.worktreePath) : undefined;
 
 						branches.push(
 							new GitBranch(
@@ -178,11 +179,10 @@ export class BranchesGitSubProvider implements GitBranchesSubProvider {
 								entry.date ? new Date(entry.date) : undefined,
 								entry.sha,
 								upstream,
-								worktreePath
-									? {
-											path: worktreePath,
-											isDefault: worktreePath === defaultWorktreePath,
-									  }
+								supportsWorktreePath
+									? worktreePath
+										? { path: worktreePath, isDefault: worktreePath === defaultWorktreePath }
+										: false
 									: undefined,
 							),
 						);
@@ -488,7 +488,9 @@ export class BranchesGitSubProvider implements GitBranchesSubProvider {
 
 			return { merged: false };
 		} catch (ex) {
-			Logger.error(ex, scope);
+			if (Logger.enabled('debug')) {
+				Logger.error(ex, scope);
+			}
 			return { merged: false };
 		}
 	}
@@ -511,7 +513,7 @@ export class BranchesGitSubProvider implements GitBranchesSubProvider {
 
 		try {
 			// If we have don't have Git v2.33+, just return
-			if (!(await this.git.isAtLeastVersion('2.33'))) {
+			if (!(await this.git.supports('git:merge-tree'))) {
 				return undefined;
 			}
 

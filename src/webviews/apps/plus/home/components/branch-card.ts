@@ -1,9 +1,11 @@
+import { consume } from '@lit/context';
 import type { TemplateResult } from 'lit';
 import { css, html, LitElement, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { classMap } from 'lit/directives/class-map.js';
 import { when } from 'lit/directives/when.js';
 import type { GlCommands } from '../../../../../constants.commands';
+import type { WebviewIds, WebviewViewIds } from '../../../../../constants.views';
 import type { LaunchpadCommandArgs } from '../../../../../plus/launchpad/launchpad';
 import {
 	actionGroupMap,
@@ -15,7 +17,15 @@ import type { AssociateIssueWithBranchCommandArgs } from '../../../../../plus/st
 import { createCommandLink } from '../../../../../system/commands';
 import { fromNow } from '../../../../../system/date';
 import { interpolate, pluralize } from '../../../../../system/string';
-import type { BranchRef, GetOverviewBranch, OpenInGraphParams } from '../../../../home/protocol';
+import { createWebviewCommandLink } from '../../../../../system/webview';
+import type {
+	BranchRef,
+	CreatePullRequestCommandArgs,
+	GetOverviewBranch,
+	OpenInGraphParams,
+	State,
+} from '../../../../home/protocol';
+import { stateContext } from '../../../home/context';
 import { renderBranchName } from '../../../shared/components/branch-name';
 import type { GlCard } from '../../../shared/components/card/card';
 import { GlElement, observe } from '../../../shared/components/element';
@@ -163,8 +173,30 @@ export const branchCardStyles = css`
 		margin-inline-end: auto;
 	}
 
+	.branch-item__row {
+		display: flex;
+		gap: 0.8rem;
+	}
+
+	.branch-item__row [full] {
+		flex-grow: 1;
+	}
+
 	.branch-item__missing {
 		--button-foreground: inherit;
+	}
+
+	.branch-item__is-narrow {
+		display: none;
+	}
+
+	@media (max-width: 330px) {
+		.branch-item__is-narrow {
+			display: block;
+		}
+		.branch-item__is-wide {
+			display: none;
+		}
 	}
 
 	:host-context(.vscode-dark) .branch-item__missing,
@@ -231,8 +263,15 @@ declare global {
 export abstract class GlBranchCardBase extends GlElement {
 	static override styles = [linkStyles, branchCardStyles];
 
+	@consume<State>({ context: stateContext, subscribe: true })
+	@state()
+	private _homeState!: State;
+
 	@property()
 	repo!: string;
+
+	@property({ type: Boolean })
+	showUpgrade = false;
 
 	private _branch!: GetOverviewBranch;
 	get branch(): GetOverviewBranch {
@@ -246,6 +285,7 @@ export abstract class GlBranchCardBase extends GlElement {
 		this.issuesPromise = value?.issues;
 		this.prPromise = value?.pr;
 		this.mergeTargetPromise = value?.mergeTarget;
+		this.remotePromise = value?.remote;
 		this.wipPromise = value?.wip;
 	}
 
@@ -372,6 +412,26 @@ export abstract class GlBranchCardBase extends GlElement {
 		void this._mergeTargetPromise?.then(
 			r => (this._mergeTarget = r),
 			() => (this._mergeTarget = undefined),
+		);
+	}
+
+	@state()
+	private _remote!: Awaited<GetOverviewBranch['remote']>;
+	get remote(): Awaited<GetOverviewBranch['remote']> {
+		return this._remote;
+	}
+
+	private _remotePromise!: GetOverviewBranch['remote'];
+	get remotePromise(): GetOverviewBranch['remote'] {
+		return this._remotePromise;
+	}
+	set remotePromise(value: GetOverviewBranch['remote']) {
+		if (this._remotePromise === value) return;
+
+		this._remotePromise = value;
+		void this._remotePromise?.then(
+			r => (this._remote = r),
+			() => (this._remote = undefined),
 		);
 	}
 
@@ -636,8 +696,20 @@ export abstract class GlBranchCardBase extends GlElement {
 		return html`<action-nav class="branch-item__collapsed-actions">${actions}</action-nav>`;
 	}
 
+	protected createWebviewCommandLink<T>(
+		command: `${WebviewIds | WebviewViewIds}.${string}` | `gitlens.plus.${string}`,
+		args?: T | any,
+	): string {
+		return createWebviewCommandLink<T>(
+			command,
+			'gitlens.views.home',
+			'',
+			args ? { ...args, ...this.branchRef } : this.branchRef,
+		);
+	}
+
 	protected createCommandLink<T>(command: GlCommands, args?: T | any): string {
-		return createCommandLink<T>(command, args ?? this.branchRef);
+		return createCommandLink<T>(command, args ? { ...args, ...this.branchRef } : this.branchRef);
 	}
 
 	protected renderTimestamp(): TemplateResult | NothingType {
@@ -705,6 +777,7 @@ export abstract class GlBranchCardBase extends GlElement {
 			?hasChanges=${hasChanges}
 			upstream=${this.branch.upstream?.name}
 			?worktree=${this.branch.worktree != null}
+			?is-default=${this.branch.worktree?.isDefault ?? false}
 		></gl-branch-icon>`;
 	}
 
@@ -712,13 +785,39 @@ export abstract class GlBranchCardBase extends GlElement {
 		if (!this.pr) {
 			if (this.branch.upstream?.missing === false && this.expanded) {
 				return html`
-					<gl-button
-						class="branch-item__missing"
-						appearance="secondary"
-						full
-						href="${this.createCommandLink('gitlens.home.createPullRequest')}"
-						>Create a Pull Request</gl-button
-					>
+					<div class="branch-item__row">
+						<gl-button
+							class="branch-item__missing"
+							appearance="secondary"
+							full
+							href="${createCommandLink('gitlens.home.createPullRequest', {
+								ref: this.branchRef,
+								describeWithAI: false,
+								source: { source: 'home', detail: 'create-pr' },
+							})}"
+							>Create a Pull Request</gl-button
+						>
+						${this._homeState.orgSettings.ai &&
+						this.remote?.provider?.supportedFeatures?.createPullRequestWithDetails
+							? html`<gl-button
+									class="branch-item__missing"
+									tooltip="Create a Pull Request with AI (Preview)"
+									appearance="secondary"
+									href="${createCommandLink<CreatePullRequestCommandArgs>(
+										'gitlens.home.createPullRequest',
+										{
+											ref: this.branchRef,
+											describeWithAI: true,
+											source: { source: 'home', detail: 'create-pr' },
+										},
+									)}"
+							  >
+									<code-icon class="branch-item__is-wide" icon="sparkle" slot="prefix"></code-icon>
+									<code-icon class="branch-item__is-narrow" icon="sparkle"></code-icon>
+									<span class="branch-item__is-wide">Create with AI</span>
+							  </gl-button>`
+							: nothing}
+					</div>
 				`;
 			}
 			return nothing;
@@ -794,6 +893,10 @@ export abstract class GlBranchCardBase extends GlElement {
 	}
 
 	protected renderMergeTargetStatus(): TemplateResult | NothingType {
+		if (this.showUpgrade) {
+			return html`<gl-merge-target-upgrade class="branch-item__merge-target"></gl-merge-target-upgrade>`;
+		}
+
 		if (!this.branch.mergeTarget) return nothing;
 
 		return html`<gl-merge-target-status

@@ -44,6 +44,7 @@ import type {
 	ProviderPullRequest,
 	ProviderRepoInput,
 	ProviderReposInput,
+	ProviderRepository,
 } from './providers/models';
 import { IssueFilter, PagingMode, PullRequestFilter } from './providers/models';
 import type { ProvidersApi } from './providers/providersApi';
@@ -464,6 +465,7 @@ export abstract class IntegrationBase<
 
 		const issueOrPR = this.container.cache.getIssueOrPullRequest(
 			id,
+			options?.type,
 			resource,
 			this,
 			() => ({
@@ -728,7 +730,7 @@ export abstract class HostingIntegration<
 	@debug()
 	async getAccountForCommit(
 		repo: T,
-		ref: string,
+		rev: string,
 		options?: {
 			avatarSize?: number;
 		},
@@ -739,7 +741,7 @@ export abstract class HostingIntegration<
 		if (!connected) return undefined;
 
 		try {
-			const author = await this.getProviderAccountForCommit(this._session!, repo, ref, options);
+			const author = await this.getProviderAccountForCommit(this._session!, repo, rev, options);
 			this.resetRequestExceptionCount();
 			return author;
 		} catch (ex) {
@@ -750,7 +752,7 @@ export abstract class HostingIntegration<
 	protected abstract getProviderAccountForCommit(
 		session: ProviderAuthenticationSession,
 		repo: T,
-		ref: string,
+		rev: string,
 		options?: {
 			avatarSize?: number;
 		},
@@ -784,6 +786,8 @@ export abstract class HostingIntegration<
 		);
 		return defaultBranch;
 	}
+
+	getRepoInfo?(repo: { owner: string; name: string; project?: string }): Promise<ProviderRepository | undefined>;
 
 	protected abstract getProviderDefaultBranch(
 		{ accessToken }: ProviderAuthenticationSession,
@@ -908,7 +912,7 @@ export abstract class HostingIntegration<
 	@debug()
 	async getPullRequestForCommit(
 		repo: T,
-		ref: string,
+		rev: string,
 		options?: { expiryOverride?: boolean | number },
 	): Promise<PullRequest | undefined> {
 		const scope = getLogScope();
@@ -917,13 +921,13 @@ export abstract class HostingIntegration<
 		if (!connected) return undefined;
 
 		const pr = this.container.cache.getPullRequestForSha(
-			ref,
+			rev,
 			repo,
 			this,
 			() => ({
 				value: (async () => {
 					try {
-						const result = await this.getProviderPullRequestForCommit(this._session!, repo, ref);
+						const result = await this.getProviderPullRequestForCommit(this._session!, repo, rev);
 						this.resetRequestExceptionCount();
 						return result;
 					} catch (ex) {
@@ -939,7 +943,7 @@ export abstract class HostingIntegration<
 	protected abstract getProviderPullRequestForCommit(
 		session: ProviderAuthenticationSession,
 		repo: T,
-		ref: string,
+		rev: string,
 	): Promise<PullRequest | undefined>;
 
 	async getMyIssuesForRepos(

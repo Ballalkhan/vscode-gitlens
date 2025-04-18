@@ -13,6 +13,7 @@ import type { IntegrationAuthenticationService } from '../authentication/integra
 import type { ProviderAuthenticationSession } from '../authentication/models';
 import { HostingIntegration } from '../integration';
 import type { BitbucketRepositoryDescriptor } from './bitbucket/models';
+import type { ProviderRepository } from './models';
 import { fromProviderPullRequest, providersMetadata } from './models';
 import type { ProvidersApi } from './providersApi';
 
@@ -65,7 +66,7 @@ export class BitbucketServerIntegration extends HostingIntegration<
 	protected override async getProviderAccountForCommit(
 		_session: AuthenticationSession,
 		_repo: BitbucketRepositoryDescriptor,
-		_ref: string,
+		_rev: string,
 		_options?: {
 			avatarSize?: number;
 		},
@@ -150,9 +151,17 @@ export class BitbucketServerIntegration extends HostingIntegration<
 	protected override async getProviderPullRequestForCommit(
 		_session: AuthenticationSession,
 		_repo: BitbucketRepositoryDescriptor,
-		_ref: string,
+		_rev: string,
 	): Promise<PullRequest | undefined> {
 		return Promise.resolve(undefined);
+	}
+
+	public override async getRepoInfo(repo: { owner: string; name: string }): Promise<ProviderRepository | undefined> {
+		const api = await this.getProvidersApi();
+		return api.getRepo(this.id, repo.owner, repo.name, undefined, {
+			accessToken: this._session?.accessToken,
+			baseUrl: this.apiBaseUrl,
+		});
 	}
 
 	protected override async getProviderRepositoryMetadata(

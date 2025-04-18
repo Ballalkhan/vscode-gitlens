@@ -6,6 +6,7 @@ import { parseCommandContext } from '../../../commands/commandContext.utils';
 import type { CopyDeepLinkCommandArgs } from '../../../commands/copyDeepLink';
 import type { CopyMessageToClipboardCommandArgs } from '../../../commands/copyMessageToClipboard';
 import type { CopyShaToClipboardCommandArgs } from '../../../commands/copyShaToClipboard';
+import type { GenerateChangelogCommandArgs } from '../../../commands/generateChangelog';
 import type { GenerateCommitMessageCommandArgs } from '../../../commands/generateCommitMessage';
 import type { InspectCommandArgs } from '../../../commands/inspect';
 import type { OpenOnRemoteCommandArgs } from '../../../commands/openOnRemote';
@@ -39,6 +40,11 @@ import {
 	undoCommit,
 } from '../../../git/actions/commit';
 import * as ContributorActions from '../../../git/actions/contributor';
+import {
+	abortPausedOperation,
+	continuePausedOperation,
+	skipPausedOperation,
+} from '../../../git/actions/pausedOperation';
 import * as RepoActions from '../../../git/actions/repository';
 import * as StashActions from '../../../git/actions/stash';
 import * as TagActions from '../../../git/actions/tag';
@@ -103,8 +109,10 @@ import {
 } from '../../../system/-webview/command';
 import { configuration } from '../../../system/-webview/configuration';
 import { getContext, onDidChangeContext } from '../../../system/-webview/context';
-import type { OpenWorkspaceLocation } from '../../../system/-webview/vscode';
-import { isDarkTheme, isLightTheme, openUrl, openWorkspace } from '../../../system/-webview/vscode';
+import { isDarkTheme, isLightTheme } from '../../../system/-webview/vscode';
+import { openUrl } from '../../../system/-webview/vscode/uris';
+import type { OpenWorkspaceLocation } from '../../../system/-webview/vscode/workspaces';
+import { openWorkspace } from '../../../system/-webview/vscode/workspaces';
 import { gate } from '../../../system/decorators/-webview/gate';
 import { debug, log } from '../../../system/decorators/log';
 import { disposableInterval } from '../../../system/function';
@@ -686,6 +694,8 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 			this.host.registerWebviewCommand('gitlens.graph.continuePausedOperation', this.continuePausedOperation),
 			this.host.registerWebviewCommand('gitlens.graph.openRebaseEditor', this.openRebaseEditor),
 			this.host.registerWebviewCommand('gitlens.graph.skipPausedOperation', this.skipPausedOperation),
+
+			this.host.registerWebviewCommand('gitlens.graph.ai.generateChangelogFrom', this.generateChangelogFrom),
 		);
 
 		return commands;
@@ -2567,7 +2577,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 					branchState.provider = {
 						name: remote.provider.name,
 						icon: remote.provider.icon === 'remote' ? 'cloud' : remote.provider.icon,
-						url: remote.provider.url({ type: RemoteResourceType.Repo }),
+						url: await remote.provider.url({ type: RemoteResourceType.Repo }),
 					};
 				}
 
@@ -3310,14 +3320,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 	private async abortPausedOperation(_item?: GraphItemContext) {
 		if (this.repository == null) return;
 
-		const abortPausedOperation = this.repository.git.status().abortPausedOperation;
-		if (abortPausedOperation == null) return;
-
-		try {
-			await abortPausedOperation();
-		} catch (ex) {
-			void window.showErrorMessage(ex.message);
-		}
+		await abortPausedOperation(this.repository);
 	}
 
 	@log()
@@ -3327,14 +3330,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		const status = await this.repository.git.status().getPausedOperationStatus?.();
 		if (status == null || status.type === 'revert') return;
 
-		const continuePausedOperation = this.repository.git.status().continuePausedOperation;
-		if (continuePausedOperation == null) return;
-
-		try {
-			await continuePausedOperation();
-		} catch (ex) {
-			void window.showErrorMessage(ex.message);
-		}
+		await continuePausedOperation(this.repository);
 	}
 
 	@log()
@@ -3357,14 +3353,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 	private async skipPausedOperation(_item?: GraphItemContext) {
 		if (this.repository == null) return;
 
-		const continuePausedOperation = this.container.git.status(this.repository.path).continuePausedOperation;
-		if (continuePausedOperation == null) return;
-
-		try {
-			await continuePausedOperation({ skip: true });
-		} catch (ex) {
-			void window.showErrorMessage(ex.message);
-		}
+		await skipPausedOperation(this.repository);
 	}
 
 	@log()
@@ -3976,6 +3965,21 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		await this.container.storage.storeWorkspace('graph:columns', columns);
 
 		void this.notifyDidChangeColumns();
+	}
+
+	@log()
+	private async generateChangelogFrom(item?: GraphItemContext) {
+		if (isGraphItemRefContext(item, 'branch') || isGraphItemRefContext(item, 'tag')) {
+			const { ref } = item.webviewItemValue;
+
+			await executeCommand<GenerateChangelogCommandArgs>('gitlens.ai.generateChangelog', {
+				repoPath: ref.repoPath,
+				head: ref,
+				source: { source: 'graph', detail: isGraphItemRefContext(item, 'branch') ? 'branch' : 'tag' },
+			});
+		}
+
+		return Promise.resolve();
 	}
 
 	private getCommitFromGraphItemRef(item?: GraphItemContext): Promise<GitCommit | undefined> {

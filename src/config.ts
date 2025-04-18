@@ -212,6 +212,10 @@ interface AIConfig {
 	readonly generateChangelog: {
 		readonly customInstructions: string;
 	};
+	readonly generatePullRequestMessage: {
+		readonly customInstructions: string;
+		readonly enabled: boolean;
+	};
 	readonly generateCommitMessage: {
 		readonly customInstructions: string;
 		readonly enabled: boolean;
@@ -219,15 +223,19 @@ interface AIConfig {
 	readonly generateStashMessage: {
 		readonly customInstructions: string;
 	};
-	readonly generateCloudPatchMessage: {
+	readonly generateCreateCloudPatch: {
 		readonly customInstructions: string;
 	};
-	readonly generateCodeSuggestMessage: {
+	readonly generateCreateCodeSuggest: {
+		readonly customInstructions: string;
+	};
+	readonly generateCreatePullRequest: {
 		readonly customInstructions: string;
 	};
 	readonly gitkraken: {
 		readonly model: AIProviderAndModel | null;
 	};
+	readonly largePromptWarningThreshold: number;
 	readonly model: SupportedAIModels | null;
 	readonly modelOptions: {
 		readonly temperature: number;
@@ -532,7 +540,13 @@ export interface MenuConfig {
 		| {
 				readonly graph: boolean;
 		  };
-	readonly scmRepositoryInline: false | { readonly graph: boolean; readonly stash: boolean };
+	readonly scmRepositoryInline:
+		| false
+		| {
+				readonly generateCommitMessage: boolean;
+				readonly graph: boolean;
+				readonly stash: boolean;
+		  };
 	readonly scmRepository:
 		| false
 		| {
@@ -641,6 +655,7 @@ export interface RemotesUrlsConfig {
 	readonly branch: string;
 	readonly commit: string;
 	readonly comparison?: string;
+	readonly createPullRequest?: string;
 	readonly file: string;
 	readonly fileInBranch: string;
 	readonly fileInCommit: string;

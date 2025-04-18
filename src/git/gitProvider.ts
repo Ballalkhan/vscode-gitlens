@@ -11,7 +11,14 @@ import type { GitBlame, GitBlameLine } from './models/blame';
 import type { GitBranch } from './models/branch';
 import type { GitCommit, GitCommitStats } from './models/commit';
 import type { GitContributor, GitContributorsStats } from './models/contributor';
-import type { GitDiff, GitDiffFile, GitDiffFiles, GitDiffFilter, GitDiffLine, GitDiffShortStat } from './models/diff';
+import type {
+	GitDiff,
+	GitDiffFiles,
+	GitDiffFilter,
+	GitDiffShortStat,
+	GitLineDiff,
+	ParsedGitDiffHunks,
+} from './models/diff';
 import type { GitFile } from './models/file';
 import type { GitFileChange } from './models/fileChange';
 import type { GitGraph } from './models/graph';
@@ -22,7 +29,7 @@ import type { GitBranchReference, GitReference } from './models/reference';
 import type { GitReflog } from './models/reflog';
 import type { GitRemote } from './models/remote';
 import type { Repository, RepositoryChangeEvent } from './models/repository';
-import type { GitRevisionRange } from './models/revision';
+import type { GitRevisionRange, GitRevisionRangeNotation } from './models/revision';
 import type { GitStash } from './models/stash';
 import type { GitStatus } from './models/status';
 import type { GitStatusFile } from './models/statusFile';
@@ -246,6 +253,7 @@ export interface GitBranchesSubProvider {
 }
 
 export interface GitCommitsSubProvider {
+	cherryPick?(repoPath: string, revs: string[], options?: { edit?: boolean; noCommit?: boolean }): Promise<void>;
 	getCommit(repoPath: string, rev: string): Promise<GitCommit | undefined>;
 	getCommitCount(repoPath: string, rev: string): Promise<number | undefined>;
 	getCommitFilesStats?(repoPath: string, rev: string): Promise<GitFileChange[] | undefined>;
@@ -360,12 +368,12 @@ export interface GitDiffSubProvider {
 		options?: { uris?: Uri[] },
 	): Promise<GitDiffShortStat | undefined>;
 	getDiff?(
-		repoPath: string | Uri,
+		repoPath: string,
 		to: string,
 		from?: string,
-		options?: { context?: number; includeUntracked?: boolean; uris?: Uri[] },
+		options?: { context?: number; includeUntracked?: boolean; notation?: GitRevisionRangeNotation; uris?: Uri[] },
 	): Promise<GitDiff | undefined>;
-	getDiffFiles?(repoPath: string | Uri, contents: string): Promise<GitDiffFiles | undefined>;
+	getDiffFiles?(repoPath: string, contents: string): Promise<GitDiffFiles | undefined>;
 	getDiffStatus(
 		repoPath: string,
 		ref1OrRange: string | GitRevisionRange,
@@ -384,6 +392,7 @@ export interface GitDiffSubProvider {
 		uri: Uri,
 		ref: string | undefined,
 		skip?: number,
+		dirty?: boolean,
 	): Promise<PreviousComparisonUrisResult | undefined>;
 	getPreviousComparisonUrisForLine(
 		repoPath: string,
@@ -439,10 +448,16 @@ export interface GitPatchSubProvider {
 	): Promise<void>;
 	createUnreachableCommitForPatch(
 		repoPath: string,
-		contents: string,
-		baseRef: string,
+		base: string,
 		message: string,
+		patch: string,
 	): Promise<GitCommit | undefined>;
+	createUnreachableCommitsFromPatches(
+		repoPath: string,
+		base: string,
+		patches: { message: string; patch: string }[],
+	): Promise<string[]>;
+
 	validatePatch(repoPath: string | undefined, contents: string): Promise<boolean>;
 }
 
@@ -536,7 +551,7 @@ export interface DisposableTemporaryGitIndex extends UnifiedAsyncDisposable {
 }
 
 export interface GitStagingSubProvider {
-	createTemporaryIndex(repoPath: string, baseRef: string): Promise<DisposableTemporaryGitIndex>;
+	createTemporaryIndex(repoPath: string, base: string): Promise<DisposableTemporaryGitIndex>;
 	stageFile(repoPath: string, pathOrUri: string | Uri, options?: { intentToAdd?: boolean }): Promise<void>;
 	stageFiles(repoPath: string, pathOrUri: string[] | Uri[], options?: { intentToAdd?: boolean }): Promise<void>;
 	stageDirectory(repoPath: string, directoryOrUri: string | Uri, options?: { intentToAdd?: boolean }): Promise<void>;
@@ -696,9 +711,9 @@ export interface GitProvider extends GitRepositoryProvider, Disposable {
 	canHandlePathOrUri(scheme: string, pathOrUri: string | Uri): string | undefined;
 	findRepositoryUri(uri: Uri, isDirectory?: boolean): Promise<Uri | undefined>;
 	getAbsoluteUri(pathOrUri: string | Uri, base: string | Uri): Uri;
-	getBestRevisionUri(repoPath: string, path: string, ref: string | undefined): Promise<Uri | undefined>;
+	getBestRevisionUri(repoPath: string, path: string, rev: string | undefined): Promise<Uri | undefined>;
 	getRelativePath(pathOrUri: string | Uri, base: string | Uri): string;
-	getRevisionUri(repoPath: string, path: string, ref: string): Uri;
+	getRevisionUri(repoPath: string, rev: string, path: string): Uri;
 	// getRootUri(pathOrUri: string | Uri): Uri;
 	getWorkingUri(repoPath: string, uri: Uri): Promise<Uri | undefined>;
 
@@ -750,14 +765,14 @@ export interface GitProvider extends GitRepositoryProvider, Disposable {
 	 * @param ref1 Commit to diff from
 	 * @param ref2 Commit to diff to
 	 */
-	getDiffForFile(uri: GitUri, ref1: string | undefined, ref2?: string): Promise<GitDiffFile | undefined>;
+	getDiffForFile(uri: GitUri, ref1: string | undefined, ref2?: string): Promise<ParsedGitDiffHunks | undefined>;
 	/**
 	 * Returns a file diff between a commit and the specified contents
 	 * @param uri Uri of the file to diff
 	 * @param ref Commit to diff from
 	 * @param contents Contents to use for the diff
 	 */
-	getDiffForFileContents(uri: GitUri, ref: string, contents: string): Promise<GitDiffFile | undefined>;
+	getDiffForFileContents(uri: GitUri, ref: string, contents: string): Promise<ParsedGitDiffHunks | undefined>;
 	/**
 	 * Returns a line diff between two commits
 	 * @param uri Uri of the file to diff
@@ -770,7 +785,7 @@ export interface GitProvider extends GitRepositoryProvider, Disposable {
 		editorLine: number,
 		ref1: string | undefined,
 		ref2?: string,
-	): Promise<GitDiffLine | undefined>;
+	): Promise<GitLineDiff | undefined>;
 	hasUnsafeRepositories?(): boolean;
 	isTrackable(uri: Uri): boolean;
 	isTracked(uri: Uri): Promise<boolean>;

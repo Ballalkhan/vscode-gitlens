@@ -2,9 +2,11 @@ import type { Range, Uri } from 'vscode';
 import type { AutolinkReference, DynamicAutolinkReference } from '../../autolinks/models/autolinks';
 import type { RemotesUrlsConfig } from '../../config';
 import { getTokensFromTemplate, interpolate } from '../../system/string';
+import type { CreatePullRequestRemoteResource } from '../models/remoteResource';
 import type { Repository } from '../models/repository';
 import type { GkProviderId } from '../models/repositoryIdentities';
-import type { RemoteProviderId } from './remoteProvider';
+import type { GitRevisionRangeNotation } from '../models/revision';
+import type { LocalInfoFromRemoteUriResult, RemoteProviderId } from './remoteProvider';
 import { RemoteProvider } from './remoteProvider';
 
 export class CustomRemote extends RemoteProvider {
@@ -35,10 +37,7 @@ export class CustomRemote extends RemoteProvider {
 		return [];
 	}
 
-	getLocalInfoFromRemoteUri(
-		_repository: Repository,
-		_uri: Uri,
-	): Promise<{ uri: Uri; startLine?: number; endLine?: number } | undefined> {
+	getLocalInfoFromRemoteUri(_repo: Repository, _uri: Uri): Promise<LocalInfoFromRemoteUriResult | undefined> {
 		return Promise.resolve(undefined);
 	}
 
@@ -58,10 +57,23 @@ export class CustomRemote extends RemoteProvider {
 		return this.getUrl(this.urls.commit, this.getContext({ id: sha }));
 	}
 
-	protected override getUrlForComparison(base: string, compare: string, notation: '..' | '...'): string | undefined {
+	protected override getUrlForComparison(
+		base: string,
+		head: string,
+		notation: GitRevisionRangeNotation,
+	): string | undefined {
 		if (this.urls.comparison == null) return undefined;
 
-		return this.getUrl(this.urls.comparison, this.getContext({ ref1: base, ref2: compare, notation: notation }));
+		return this.getUrl(this.urls.comparison, this.getContext({ ref1: base, ref2: head, notation: notation }));
+	}
+
+	protected override getUrlForCreatePullRequest({ base, head }: CreatePullRequestRemoteResource): string | undefined {
+		if (this.urls.createPullRequest == null) return undefined;
+
+		return this.getUrl(
+			this.urls.createPullRequest,
+			this.getContext({ base: base.branch ?? '', head: head.branch }),
+		);
 	}
 
 	protected getUrlForFile(fileName: string, branch?: string, sha?: string, range?: Range): string {
@@ -116,7 +128,7 @@ export class CustomRemote extends RemoteProvider {
 	}
 
 	private getContext(additionalContext?: Record<string, string>) {
-		const [repoBase, repoPath] = this.splitPath();
+		const [repoBase, repoPath] = this.splitPath(this.path);
 		const context: Record<string, string> = {
 			repo: this.path,
 			repoBase: repoBase,

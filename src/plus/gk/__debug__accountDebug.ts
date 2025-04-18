@@ -65,8 +65,8 @@ type SimulateQuickPickItem = QuickPickItemOfT<
 			expiredPaid?: boolean;
 			planId?:
 				| SubscriptionPlanId.Pro
-				| SubscriptionPlanId.Teams
 				| SubscriptionPlanId.Advanced
+				| SubscriptionPlanId.Business
 				| SubscriptionPlanId.Enterprise;
 			featurePreviews?: never;
 	  }
@@ -140,13 +140,13 @@ class AccountDebug {
 				createQuickPickSeparator('Trial'),
 				{
 					label: 'Pro Trial',
-					description: 'Pro, account',
+					description: 'Pro trial (pro plan), account',
 					iconPath: new ThemeIcon('blank'),
 					item: { state: SubscriptionState.ProTrial },
 				},
 				{
 					label: 'Pro Trial (Reactivated)',
-					description: 'Pro, account',
+					description: 'Pro trial (pro plan), account',
 					iconPath: new ThemeIcon('blank'),
 					item: {
 						state: SubscriptionState.ProTrial,
@@ -155,13 +155,13 @@ class AccountDebug {
 				},
 				{
 					label: 'Pro Trial (Advanced)',
-					description: 'Advanced, account',
+					description: 'Pro trial (advanced plan), account',
 					iconPath: new ThemeIcon('blank'),
 					item: { state: SubscriptionState.ProTrial, planId: SubscriptionPlanId.Advanced },
 				},
 				{
-					label: 'Pro Trial (Advanced Reactivated)',
-					description: 'Advanced, account',
+					label: 'Pro Trial (Advanced, Reactivated)',
+					description: 'Pro trial (advanced plan), account',
 					iconPath: new ThemeIcon('blank'),
 					item: {
 						state: SubscriptionState.ProTrial,
@@ -190,19 +190,19 @@ class AccountDebug {
 				},
 				{
 					label: 'Advanced',
-					description: 'Advanced, account',
+					description: 'Advanced plan, account',
 					iconPath: new ThemeIcon('blank'),
 					item: { state: SubscriptionState.Paid, planId: SubscriptionPlanId.Advanced },
 				},
 				{
-					label: 'Teams',
-					description: 'Teams, account',
+					label: 'Business',
+					description: 'Business plan, account',
 					iconPath: new ThemeIcon('blank'),
-					item: { state: SubscriptionState.Paid, planId: SubscriptionPlanId.Teams },
+					item: { state: SubscriptionState.Paid, planId: SubscriptionPlanId.Business },
 				},
 				{
 					label: 'Enterprise',
-					description: 'Enterprise, no account',
+					description: 'Enterprise plan, account',
 					iconPath: new ThemeIcon('blank'),
 					item: { state: SubscriptionState.Paid, planId: SubscriptionPlanId.Enterprise },
 				},

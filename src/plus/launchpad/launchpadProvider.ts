@@ -29,7 +29,7 @@ import {
 import { executeCommand, registerCommand } from '../../system/-webview/command';
 import { configuration } from '../../system/-webview/configuration';
 import { setContext } from '../../system/-webview/context';
-import { openUrl } from '../../system/-webview/vscode';
+import { openUrl } from '../../system/-webview/vscode/uris';
 import { gate } from '../../system/decorators/-webview/gate';
 import { debug, log } from '../../system/decorators/log';
 import { filterMap, groupByMap, map, some } from '../../system/iterable';
@@ -492,9 +492,11 @@ export class LaunchpadProvider implements Disposable {
 		);
 		if (deepLinkUrl == null) return;
 
-		const prRepo = await getOrOpenPullRequestRepository(this.container, item.underlyingPullRequest, {
-			skipVirtual: true,
-		});
+		const prRepo = options?.openInWorktree
+			? await getOrOpenPullRequestRepository(this.container, item.underlyingPullRequest, {
+					skipVirtual: true,
+			  })
+			: undefined;
 		this._codeSuggestions?.delete(item.uuid);
 		await this.container.deepLinks.processDeepLinkUri(deepLinkUrl, false, prRepo);
 	}

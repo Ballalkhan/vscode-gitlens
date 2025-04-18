@@ -14,7 +14,7 @@ import { Container } from '../../container';
 import { showRevisionFilesPicker } from '../../quickpicks/revisionFilesPicker';
 import { executeCommand, executeCoreGitCommand, executeEditorCommand } from '../../system/-webview/command';
 import { configuration } from '../../system/-webview/configuration';
-import { findOrOpenEditor, findOrOpenEditors, openChangesEditor } from '../../system/-webview/vscode';
+import { getOrOpenTextEditor, openChangesEditor, openTextEditors } from '../../system/-webview/vscode/editors';
 import { getSettledValue } from '../../system/promise';
 import type { ViewNode } from '../../views/nodes/abstract/viewNode';
 import type { ShowInCommitGraphCommandArgs } from '../../webviews/plus/graph/registration';
@@ -532,9 +532,9 @@ export async function openFileAtRevision(
 		}
 
 		uri = Container.instance.git.getRevisionUri(
+			commit.repoPath,
 			file.status === 'D' ? (await commit.getPreviousSha()) ?? deletedOrMissing : commit.sha,
 			file,
-			commit.repoPath,
 		);
 	}
 
@@ -552,7 +552,7 @@ export async function openFileAtRevision(
 
 	let editor: TextEditor | undefined;
 	try {
-		editor = await findOrOpenEditor(uri, { throwOnError: true, ...opts });
+		editor = await getOrOpenTextEditor(uri, { throwOnError: true, ...opts });
 	} catch (ex) {
 		if (!ex?.message?.includes('Unable to resolve nonexistent file')) {
 			void window.showErrorMessage(`Unable to open '${gitUri.relativePath}' in revision '${gitUri.sha}'`);
@@ -570,14 +570,14 @@ export async function openFileAtRevision(
 				keyboard: {
 					keys: ['right', 'alt+right', 'ctrl+right'],
 					onDidPressKey: async (_key, uri) => {
-						await findOrOpenEditor(uri, { ...opts, preserveFocus: true, preview: true });
+						await getOrOpenTextEditor(uri, { ...opts, preserveFocus: true, preview: true });
 					},
 				},
 			},
 		);
 		if (pickedUri == null) return;
 
-		editor = await findOrOpenEditor(pickedUri, opts);
+		editor = await getOrOpenTextEditor(pickedUri, opts);
 	}
 
 	if (annotationType != null && editor != null) {
@@ -632,7 +632,7 @@ export async function openFiles(
 			),
 		)
 	).filter(<T>(u?: T): u is T => Boolean(u));
-	findOrOpenEditors(uris, options);
+	openTextEditors(uris, options);
 }
 
 export async function openFilesAtRevision(commit: GitCommit, options?: TextDocumentShowOptions): Promise<void>;
@@ -658,9 +658,9 @@ export async function openFilesAtRevision(
 		return;
 	}
 
-	findOrOpenEditors(
+	openTextEditors(
 		files.map(file =>
-			Container.instance.git.getRevisionUri(file.status === 'D' ? refs.lhs : refs.rhs, file, refs.repoPath),
+			Container.instance.git.getRevisionUri(refs.repoPath, file.status === 'D' ? refs.lhs : refs.rhs, file),
 		),
 		options,
 	);
@@ -756,11 +756,11 @@ export async function openOnlyChangedFiles(container: Container, files: GitFile[
 export async function openOnlyChangedFiles(container: Container, commitOrFiles: GitCommit | GitFile[]): Promise<void> {
 	let files;
 	if (isCommit(commitOrFiles)) {
-		if (commitOrFiles.files == null) {
+		if (commitOrFiles.fileset?.files == null || commitOrFiles.fileset?.filtered) {
 			await commitOrFiles.ensureFullDetails();
 		}
 
-		files = commitOrFiles.files ?? [];
+		files = commitOrFiles.fileset?.files ?? [];
 	} else {
 		files = commitOrFiles.map(f => new GitFileChange(container, f.repoPath!, f.path, f.status, f.originalPath));
 	}
@@ -848,13 +848,13 @@ async function getChangesRefArgs(
 		};
 	}
 
-	if (commitOrFiles.files == null) {
+	if (commitOrFiles.fileset?.files == null) {
 		await commitOrFiles.ensureFullDetails();
 	}
 
 	return {
 		commit: commitOrFiles,
-		files: commitOrFiles.files ?? [],
+		files: commitOrFiles.fileset?.files ?? [],
 		options: refOrOptions as TextDocumentShowOptions | undefined,
 		ref: {
 			repoPath: commitOrFiles.repoPath,
@@ -881,13 +881,13 @@ async function getChangesRefsArgs(
 		};
 	}
 
-	if (commitOrFiles.files == null) {
+	if (commitOrFiles.fileset?.files == null) {
 		await commitOrFiles.ensureFullDetails();
 	}
 
 	return {
 		commit: commitOrFiles,
-		files: commitOrFiles.files ?? [],
+		files: commitOrFiles.fileset?.files ?? [],
 		options: refsOrOptions as TextDocumentShowOptions | undefined,
 		refs: {
 			repoPath: commitOrFiles.repoPath,
@@ -904,12 +904,12 @@ async function getCommitChangesArgs(
 	commit: GitCommit,
 	filter?: (file: GitFileChange) => boolean,
 ): Promise<{ files: readonly GitFile[]; refs: RefRange }> {
-	if (commit.files == null) {
+	if (commit.fileset?.files == null) {
 		await commit.ensureFullDetails();
 	}
 
 	return {
-		files: (filter != null ? commit.files?.filter(filter) : commit.files) ?? [],
+		files: (filter != null ? commit.fileset?.files?.filter(filter) : commit.fileset?.files) ?? [],
 		refs: {
 			repoPath: commit.repoPath,
 			rhs: commit.sha,

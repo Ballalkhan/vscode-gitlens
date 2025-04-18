@@ -6,6 +6,75 @@ import { OpenAICompatibleProvider } from './openAICompatibleProvider';
 type OpenAIModel = AIModel<typeof provider.id>;
 const models: OpenAIModel[] = [
 	{
+		id: 'gpt-4.1',
+		name: 'GPT-4.1',
+		maxTokens: { input: 1047576, output: 32768 },
+		provider: provider,
+	},
+	{
+		id: 'gpt-4.1-2025-04-14',
+		name: 'GPT-4.1 (2025-04-14)',
+		maxTokens: { input: 1047576, output: 32768 },
+		provider: provider,
+		hidden: true,
+	},
+	{
+		id: 'gpt-4.1-mini',
+		name: 'GPT-4.1 mini',
+		maxTokens: { input: 1047576, output: 32768 },
+		provider: provider,
+	},
+	{
+		id: 'gpt-4.1-mini-2025-04-14',
+		name: 'GPT-4.1 mini (2025-04-14)',
+		maxTokens: { input: 1047576, output: 32768 },
+		provider: provider,
+		hidden: true,
+	},
+	{
+		id: 'gpt-4.1-nano',
+		name: 'GPT-4.1 nano',
+		maxTokens: { input: 1047576, output: 32768 },
+		provider: provider,
+	},
+	{
+		id: 'gpt-4.1-nano-2025-04-14',
+		name: 'GPT-4.1 nano (2025-04-14)',
+		maxTokens: { input: 1047576, output: 32768 },
+		provider: provider,
+		hidden: true,
+	},
+	{
+		id: 'o4-mini',
+		name: 'o4 mini',
+		maxTokens: { input: 200000, output: 100000 },
+		provider: provider,
+		temperature: null,
+	},
+	{
+		id: 'o4-mini-2025-04-16',
+		name: 'o4 mini (2025-04-16)',
+		maxTokens: { input: 200000, output: 100000 },
+		provider: provider,
+		temperature: null,
+		hidden: true,
+	},
+	{
+		id: 'o3',
+		name: 'o3',
+		maxTokens: { input: 200000, output: 100000 },
+		provider: provider,
+		temperature: null,
+	},
+	{
+		id: 'o3-2025-04-16',
+		name: 'o3 (2025-04-16)',
+		maxTokens: { input: 200000, output: 100000 },
+		provider: provider,
+		temperature: null,
+		hidden: true,
+	},
+	{
 		id: 'o3-mini',
 		name: 'o3 mini',
 		maxTokens: { input: 200000, output: 100000 },
@@ -226,9 +295,9 @@ export class OpenAIProvider extends OpenAICompatibleProvider<typeof provider.id>
 
 	protected override getHeaders<TAction extends AIActionType>(
 		action: TAction,
+		apiKey: string,
 		model: AIModel<typeof provider.id>,
 		url: string,
-		apiKey: string,
 	): Record<string, string> | Promise<Record<string, string>> {
 		if (url.includes('.azure.com')) {
 			return {
@@ -238,6 +307,6 @@ export class OpenAIProvider extends OpenAICompatibleProvider<typeof provider.id>
 			};
 		}
 
-		return super.getHeaders(action, model, url, apiKey);
+		return super.getHeaders(action, apiKey, model, url);
 	}
 }
